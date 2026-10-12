@@ -1,0 +1,34 @@
+{
+    "schemaVersion": 1,
+    "id": "${mod_id}",
+    "version": "${mod_version}",
+    "name": "${mod_name}",
+    "description": "${mod_description}",
+    "authors": [
+        "${mod_authors}"
+    ],
+    "contact": {
+        "homepage": "${mod_github}",
+        "sources": "${mod_github}",
+        "issues": "${mod_issues}"
+    },
+    "license": "${license}",
+    "icon": "${icon}",
+    "environment": "client",
+    "entrypoints": {
+        "client": [
+            {
+                "value": "io.github.u2894638479.kotlinmcuiwindow.fabric.WindowFabricEntry",
+                "adapter": "kotlin"
+            }
+        ]
+    },
+    "depends": {
+        "fabricloader": "*",
+        "minecraft": "*",
+        "java": ">=8",
+        "fabric-language-kotlin": "*",
+        "kotlinmcui": "*",
+        "kotlinmcuibackend": "*"
+    }
+}

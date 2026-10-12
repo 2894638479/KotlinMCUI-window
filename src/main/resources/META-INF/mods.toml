@@ -1,0 +1,32 @@
+modLoader = "lowcodefml"
+loaderVersion = "[0,)"
+issueTrackerURL = "${mod_issues}"
+license = "${license}"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "${mod_name}"
+authors = "${mod_authors}"
+description = '''
+${mod_description}
+'''
+logoFile = "${icon}"
+
+# The core library is what the pages are written against, and the headless backend is what installs
+# the framework and brings the Kotlin runtime, so this jar needs both.
+[[dependencies.${mod_id}]]
+modId = "kotlinmcui"
+mandatory = true
+versionRange = "[0,)"
+ordering = "NONE"
+side = "CLIENT"
+
+# No version bounds on the game itself: the jar holds no Minecraft reference at all, so it is not
+# tied to a game version.
+[[dependencies.${mod_id}]]
+modId = "kotlinmcuibackend"
+mandatory = true
+versionRange = "[0,)"
+ordering = "NONE"
+side = "CLIENT"

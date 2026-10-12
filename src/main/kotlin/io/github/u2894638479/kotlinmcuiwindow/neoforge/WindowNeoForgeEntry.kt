@@ -1,0 +1,31 @@
+package io.github.u2894638479.kotlinmcuiwindow.neoforge
+
+import io.github.u2894638479.kotlinmcui.backend.DslRuntime
+import io.github.u2894638479.kotlinmcuiwindow.WindowBackend
+import net.neoforged.bus.api.IEventBus
+import net.neoforged.fml.common.Mod
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent
+
+private const val MOD_ID = "kotlinmcuiwindow"
+
+/**
+ * NeoForge's entry point.
+ *
+ * The same split as the Forge one: the constructor subscribes to the mod bus that NeoForge injects,
+ * and the publishing waits for `FMLClientSetupEvent`, which NeoForge fires after every mod object
+ * exists - and therefore after the headless backend's `install`.
+ *
+ * The bus arrives as a constructor parameter here rather than through a static accessor, because
+ * NeoForge injects `IEventBus` into a mod's constructor and has done so for every version this jar
+ * targets. Nothing here touches a Minecraft class.
+ */
+@Mod(MOD_ID)
+class WindowNeoForgeEntry(modBus: IEventBus) {
+    init {
+        modBus.addListener { _: FMLClientSetupEvent -> clientSetup() }
+    }
+
+    private fun clientSetup() {
+        DslRuntime.platformReady { WindowBackend }
+    }
+}
