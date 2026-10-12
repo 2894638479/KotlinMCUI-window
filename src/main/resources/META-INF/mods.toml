@@ -1,4 +1,6 @@
-modLoader = "lowcodefml"
+# FML's own loader. lowcodefml names the Kotlin provider instead, and a mod that has an
+# @Mod class loaded with it never gets that class constructed - the entry point stays silent.
+modLoader = "javafml"
 loaderVersion = "[0,)"
 issueTrackerURL = "${mod_issues}"
 license = "${license}"

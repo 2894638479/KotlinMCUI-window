@@ -1,7 +1,9 @@
 issueTrackerURL = "${mod_issues}"
 license = "${license}"
 
-modLoader = "lowcodefml"
+# Kotlin for Forge's language loader id. lowcodefml is not the same thing: a mod with an
+# @Mod class loaded through it never gets that class constructed.
+modLoader = "kotlinforforge"
 loaderVersion = "[0,)"
 
 [[mods]]
