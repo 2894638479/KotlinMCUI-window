@@ -29,6 +29,9 @@ private const val MOD_ID = "kotlinmcuiwindow"
 @Suppress("DEPRECATION")
 class WindowForgeEntry {
     init {
+        // The game runs with java.awt.headless=true and AWT caches that on first use, so
+        // clear it before anything in this process loads an AWT class.
+        System.setProperty("java.awt.headless", "false")
         FMLJavaModLoadingContext.get().modEventBus.addListener { _: FMLClientSetupEvent -> clientSetup() }
     }
 

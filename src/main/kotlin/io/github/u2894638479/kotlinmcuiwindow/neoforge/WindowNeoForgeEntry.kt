@@ -22,6 +22,9 @@ private const val MOD_ID = "kotlinmcuiwindow"
 @Mod(MOD_ID)
 class WindowNeoForgeEntry(modBus: IEventBus) {
     init {
+        // The game runs with java.awt.headless=true and AWT caches that on first use, so
+        // clear it before anything in this process loads an AWT class.
+        System.setProperty("java.awt.headless", "false")
         modBus.addListener { _: FMLClientSetupEvent -> clientSetup() }
     }
 
