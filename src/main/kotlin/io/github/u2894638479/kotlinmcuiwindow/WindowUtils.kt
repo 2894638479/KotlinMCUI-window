@@ -21,12 +21,9 @@ import kotlin.system.exitProcess
 /**
  * Everything the framework asks of a platform that is not drawing.
  *
- * The two that differ from a game backend, both consequences of this backend holding no loader
- * reference:
- * - [translate] always answers `null`, so every key comes out as it went in: a window has no
- *   language files to resolve against, and inventing English text for a key the framework's own
- *   entries use would be worse than showing the key.
- * - [quit] ends the process instead of stopping a game, because there is no game to ask.
+ * The one that differs from a game backend is [quit]: it ends the process instead of stopping a
+ * game, because there is no game to ask. [translate] answers from the framework's own language
+ * files, which travel in the core library's jar and are therefore on this classpath already.
  */
 internal object WindowUtils : DslBackendUtils {
     override var clipboard: String
@@ -44,11 +41,7 @@ internal object WindowUtils : DslBackendUtils {
         // Swing's accessible context is not populated by this backend, so there is nothing to say.
     }
 
-    override fun translate(key: String, vararg args: Any?): String? {
-        // Deliberately no translation: this backend ships no language files, and the framework
-        // treats `null` as "show the key itself".
-        return null
-    }
+    override fun translate(key: String, vararg args: Any?): String? = WindowTranslations.get(key, args)
 
     override val isInWorld: Boolean get() = false
 
@@ -104,11 +97,13 @@ internal object WindowUtils : DslBackendUtils {
      * screenshot that silently belongs to another application is worse than no screenshot. Rendering
      * the content is deterministic and is still this backend's own pixels, which is what a preview
      * gates on.
+     *
+     * The content is the page at the top of the stack: the pages below it are not in the rendered
+     * tree, so photographing the surface photographs the page the user is on.
      */
     private fun captureNow(fileName: String): File? {
-        val screen = WindowBackend.shownScreen ?: return null
-        val frame = screen.frame ?: return null
-        val surface = frame.contentPane ?: return null
+        if (WindowFrame.top() == null) return null
+        val surface = WindowFrame.surface() ?: return null
         val image = BufferedImage(maxOf(surface.width, 1), maxOf(surface.height, 1), BufferedImage.TYPE_INT_ARGB)
         val graphics = image.createGraphics()
         return try {
