@@ -231,22 +231,28 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
     context(renderParam: WindowRenderParam, ctx: DslScaleContext)
     override fun renderItem(rect: Rect, item: String, count: Int, damage: Double?, enchanted: Boolean) {
         if (rect.isEmpty) return
-        // No item textures: a real window has no resource pack, so an item is stood in for by a
-        // plate, its first letter and its stack size rather than by a wrong-looking sprite.
-        renderQuad(rect, ITEM, ITEM, ITEM, ITEM)
-        outline(rect, ITEM_BORDER)
         val bounds = rect.bounds() ?: return
         val (l, t, r, b) = bounds
-        val letter = item.substringAfterLast(':').firstOrNull()
-        if (letter != null) {
-            val size = minOf(b - t - 2f, 9f).coerceAtLeast(1f)
-            getFont().renderChar(
-                DslRenderableChar(letter.code, DslCharStyle(), Color.WHITE, size.px),
-                (l + 2f).px,
-                (t + 1f).px,
-                0.px,
-                0.px,
-            )
+        val icon = WindowItems.get(item)
+        if (icon != null) {
+            // A window next to the game reads the icon out of the client jar, and that is the item.
+            drawIcon(icon, l, t, r, b)
+        } else {
+            // No game to read from: an item is stood in for by a plate and its first letter rather
+            // than by a wrong-looking sprite.
+            renderQuad(rect, ITEM, ITEM, ITEM, ITEM)
+            outline(rect, ITEM_BORDER)
+            val letter = item.substringAfterLast(':').firstOrNull()
+            if (letter != null) {
+                val size = minOf(b - t - 2f, 9f).coerceAtLeast(1f)
+                getFont().renderChar(
+                    DslRenderableChar(letter.code, DslCharStyle(), Color.WHITE, size.px),
+                    (l + 2f).px,
+                    (t + 1f).px,
+                    0.px,
+                    0.px,
+                )
+            }
         }
         val durability = damage
         if (durability != null) {
@@ -254,13 +260,17 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
             fillRect(Rect((l + 1f).px, (b - 3f).px, (l + 1f + filled).px, (b - 1f).px), DAMAGE)
         }
         if (count > 1) {
-            getFont().renderChar(
-                DslRenderableChar('0'.code + (count % 10), DslCharStyle(), Color.WHITE, 9.px),
-                (r - 6f).px,
-                (b - 10f).px,
-                0.px,
-                0.px,
-            )
+            // Every digit, right to left: a stack of 64 drawn as its last digit reads as 4.
+            val digits = count.toString()
+            digits.forEachIndexed { index, digit ->
+                getFont().renderChar(
+                    DslRenderableChar(digit.code, DslCharStyle(), Color.WHITE, 9.px),
+                    (r - 6f - (digits.length - 1 - index) * 6f).px,
+                    (b - 10f).px,
+                    0.px,
+                    0.px,
+                )
+            }
         }
         if (enchanted) {
             // The glint is a flat tint over the plate: there is no animated overlay texture to
@@ -408,6 +418,19 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
         fillRect(Rect(l.px, b.px - BORDER_WIDTH, r.px, b.px), color)
         fillRect(Rect(l.px, t.px, l.px + BORDER_WIDTH, b.px), color)
         fillRect(Rect(r.px - BORDER_WIDTH, t.px, r.px, b.px), color)
+    }
+
+    /** Draw a decoded icon into the given bounds, scaled with nearest-neighbour so it stays crisp. */
+    context(renderParam: WindowRenderParam)
+    private fun drawIcon(icon: BufferedImage, l: Float, t: Float, r: Float, b: Float) {
+        val graphics = renderParam.graphics
+        val saved = graphics.getRenderingHint(RenderingHints.KEY_INTERPOLATION)
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+        graphics.drawImage(icon, l.toInt(), t.toInt(), (r - l).toInt(), (b - t).toInt(), null)
+        graphics.setRenderingHint(
+            RenderingHints.KEY_INTERPOLATION,
+            saved ?: RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR,
+        )
     }
 
     /** The exact paint for the corner combinations Java2D has a primitive for, or `null`. */
