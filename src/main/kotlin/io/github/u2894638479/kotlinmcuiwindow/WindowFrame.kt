@@ -43,6 +43,14 @@ import javax.swing.WindowConstants
  * Nothing here touches Minecraft: the window is an ordinary Swing window that happens to live
  * inside the game's process, and its lifetime is its own.
  */
+/**
+ * Whether closing the page on screen ends it.
+ *
+ * A stack of one has no page below it: that page is the floor, and it is what the window comes back
+ * to, so closing it puts the window away instead of ending the last thing in it.
+ */
+internal fun endsPage(stackSize: Int) = stackSize > 1
+
 internal object WindowFrame {
     /** ~60 frames per second, the same cadence the game's own screen loop runs at. */
     private const val FRAME_MILLIS = 16
@@ -102,10 +110,11 @@ internal object WindowFrame {
     /**
      * End the page on screen.
      *
-     * The page below it takes its place; the last page has nothing below it, so the window is put
-     * away instead - see [minimize]. That is what makes a close on the bottom page behave like the
-     * game backend's default: there is no previous screen, so the platform is told the screen is
-     * over.
+     * The page below it takes its place. The page at the bottom of the stack is the floor - it is what
+     * the window comes back to - so a close on it does not end it: the window is put away with the
+     * stack untouched, and the taskbar entry brings that same page back (see [minimize]). That is also
+     * what makes a close on the bottom page behave like the game backend's default: there is no
+     * previous screen, so the platform is told the screen is over.
      *
      * Returns whether a page was ended.
      */
@@ -114,20 +123,20 @@ internal object WindowFrame {
         // off the stack, so letting it through would take the page below it down as well. The same
         // arrives from every page while the window itself is coming down.
         if (popping || updating) return@onEdtAndReturn false
-        val page = pages.removeLastOrNull() ?: return@onEdtAndReturn false
+        if (!endsPage(pages.size)) {
+            minimize()
+            return@onEdtAndReturn false
+        }
+        val page = pages.removeLast()
         popping = true
         try {
             // The page is off the stack before it is released: a close action that shows a page has
             // to see the stack as it will be, not as it was.
             page.release()
-            val previous = pages.lastOrNull()
-            if (previous != null) {
-                frame?.title = previous.title
-                previous.mount()
-                focusSurface()
-            } else {
-                minimize()
-            }
+            val previous = pages.last()
+            frame?.title = previous.title
+            previous.mount()
+            focusSurface()
         } finally {
             popping = false
         }
