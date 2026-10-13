@@ -37,5 +37,8 @@ class WindowForgeEntry {
 
     private fun clientSetup() {
         DslRuntime.platformReady { WindowBackend }
+        // The window goes up here rather than from the constructor: by this point the headless
+        // backend has installed the framework, so the entry list it opens with has entries to list.
+        WindowBackend.open()
     }
 }

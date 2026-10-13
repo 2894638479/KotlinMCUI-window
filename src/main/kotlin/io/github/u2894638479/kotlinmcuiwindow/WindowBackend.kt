@@ -8,20 +8,25 @@ import io.github.u2894638479.kotlinmcui.backend.DslBackendScreenHolder
 import io.github.u2894638479.kotlinmcui.backend.DslBackendUtils
 import io.github.u2894638479.kotlinmcui.container.TopComponent
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
+import io.github.u2894638479.kotlinmcui.entry.DslEntryPage
 import io.github.u2894638479.kotlinmcui.math.px
 import java.awt.Graphics2D
 
 /**
- * The window backend: a Swing window and a Java2D software renderer, with no Minecraft in it.
+ * The window backend: one Swing window and a Java2D software renderer, with no Minecraft in it.
  *
  * It is assembled from the same four pieces any backend is - a renderer, metadata, utilities and
  * input - and adds only the frame loop that drives [TopComponent]. The type parameters are this
  * backend's own: [WindowRenderParam] is the `Graphics2D` of the frame being painted and
- * [WindowScreen] is the window that owns it, so nothing here has to be parameterised over a game's
+ * [WindowScreen] is one page of the window, so nothing here has to be parameterised over a game's
  * screen class.
  *
- * It is a singleton because the framework publishes exactly one backend per process; a second window
- * is another [WindowScreen], not another backend.
+ * There is exactly one window, and pages are a stack inside it rather than a window each: the
+ * framework's own `showScreen` becomes [WindowFrame.push] and a page ending becomes
+ * [WindowFrame.pop], which puts the page below it back. The stack lives in [WindowFrame]; this
+ * object is the framework-facing half of it.
+ *
+ * It is a singleton because the framework publishes exactly one backend per process.
  */
 object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
     DslBackendRenderer<WindowRenderParam> by WindowRenderer,
@@ -29,17 +34,22 @@ object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
     DslBackendUtils by WindowUtils,
     DslBackendInput by WindowInput
 {
-    /** The screen whose window was shown last, which is the one a screenshot photographs. */
-    @Volatile
-    var shownScreen: WindowScreen? = null
-        private set
-
-    private val screens = ArrayList<WindowScreen>()
+    /**
+     * Open the window with the framework's entry list as the page at the bottom of the stack.
+     *
+     * Called once by the loader entry points, after [io.github.u2894638479.kotlinmcui.backend.DslRuntime.platformReady]
+     * has published this backend - that is what makes the framework's own `dslBackend` usable inside
+     * the page, and the entry list is built on it: it lists what `DslEntryLoader` discovered and
+     * pushes a page of its own for every entry that is clicked.
+     */
+    internal fun open() {
+        WindowFrame.open(create(ROOT_TITLE) { DslEntryPage() }.screen)
+    }
 
     override fun create(title: String, dslFunction: DslFunction): DslBackendScreenHolder<WindowScreen> =
         create(title, dslFunction, DEFAULT_WIDTH, DEFAULT_HEIGHT)
 
-    /** [create] with an explicit window size, for the standalone run's placeholder window. */
+    /** [create] with an explicit window size, which only the first page of the window gets to use. */
     internal fun create(
         title: String,
         dslFunction: DslFunction,
@@ -47,7 +57,9 @@ object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
         height: Int,
     ): DslBackendScreenHolder<WindowScreen> = object : DslBackendScreenHolder<WindowScreen> {
         override val screen = WindowScreen(this@WindowBackend, title, width, height, dslFunction)
-        override fun show() = screen.show()
+        // Showing a page is entering it: the page becomes the top of the window's stack, and the
+        // page below it stays where it is, unmounted. This is the whole of "show a screen" here.
+        override fun show() = WindowFrame.push(screen)
         override val dslScreen get() = screen.dslScreen
     }
 
@@ -72,19 +84,11 @@ object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
         context(param) { flush() }
     }
 
-    internal fun register(screen: WindowScreen) {
-        screens.add(screen)
-        shownScreen = screen
-    }
-
-    internal fun unregister(screen: WindowScreen) {
-        screens.remove(screen)
-        if (shownScreen === screen) shownScreen = screens.lastOrNull()
-    }
-
     internal fun closeAll() {
-        screens.toList().forEach { it.close() }
+        WindowFrame.close()
     }
+
+    private const val ROOT_TITLE = "KotlinMCUI"
 
     private const val DEFAULT_WIDTH = 960
     private const val DEFAULT_HEIGHT = 540

@@ -2,10 +2,8 @@ package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.backend.DslRuntime
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
-import io.github.u2894638479.kotlinmcui.test.TestColorPage
 import kotlinx.coroutines.runBlocking
 import java.awt.GraphicsEnvironment
-import javax.swing.SwingUtilities
 
 /**
  * Opens the window with no game behind it.
@@ -15,10 +13,14 @@ import javax.swing.SwingUtilities
  * calls `DslRuntime.install`, because there is no headless backend in this process to do it - inside
  * a game this file is never reached, and `install` is that backend's job there.
  *
+ * The window it opens is the same one the in-game entries open, with the framework's entry list at
+ * the bottom of its stack: that page is the framework's own, and it is what a person expects to see
+ * when this backend is started on its own.
+ *
  * `-Dkotlinmcuiwindow.capture=<file>` photographs the window into `screenshots/<file>` once the page
  * has painted, and leaves with 0; `-Dkotlinmcuiwindow.capture.delay=<ms>` waits that long first. The
- * framework's own `-Dkotlinmcui.preview=<page>` session works here too, and opens the page it names
- * in a second window next to the placeholder this always shows.
+ * framework's own `-Dkotlinmcui.preview=<page>` session works here too, and pushes the page it names
+ * on top of the entry list in the same window.
  */
 fun main(args: Array<String>) {
     check(!GraphicsEnvironment.isHeadless()) {
@@ -29,27 +31,8 @@ fun main(args: Array<String>) {
 
     DslRuntime.install { WindowMetadata }
     DslRuntime.platformReady { WindowBackend }
-
-    // A window always goes up, even for a preview session: the framework counts a frame only once
-    // something has rendered one, and a preview waits for that count before it opens its own page.
-    // For a preview the placeholder is a small window, so the page that follows is unmistakably the
-    // one on top - and therefore the one a screenshot photographs.
-    val placeholder = preview != null
-    val holder = WindowBackend.create(
-        if (placeholder) "KotlinMCUI-window (placeholder)" else "KotlinMCUI-window - TestColorPage",
-        { TestColorPage() },
-        if (placeholder) PLACEHOLDER_WIDTH else DEMO_WIDTH,
-        if (placeholder) PLACEHOLDER_HEIGHT else DEMO_HEIGHT,
-    )
-    onEdtAndWait { holder.show() }
-    dslLogger.info("standalone: window shown")
-    onEdtAndWait {
-        // The holder is what create returns; the window is what its screen put on the desktop.
-        val frame = holder.screen.frame
-        dslLogger.info(
-            "standalone: frame bounds=${frame?.bounds} visible=${frame?.isVisible} showing=${frame?.isShowing}"
-        )
-    }
+    WindowBackend.open()
+    dslLogger.info("standalone: window shown with the entry list at the bottom of its stack")
 
     // A preview session photographs and quits on its own; this path is for a plain standalone run.
     if (captureName != null && preview == null) captureAndExit(captureName)
@@ -75,15 +58,7 @@ private fun captureAndExit(fileName: String) {
     }.start()
 }
 
-private fun onEdtAndWait(block: () -> Unit) {
-    if (SwingUtilities.isEventDispatchThread()) block() else SwingUtilities.invokeAndWait(block)
-}
-
 private const val CAPTURE_PROPERTY = "kotlinmcuiwindow.capture"
 private const val CAPTURE_DELAY_PROPERTY = "kotlinmcuiwindow.capture.delay"
 private const val PREVIEW_PROPERTY = "kotlinmcui.preview"
 private const val DEFAULT_CAPTURE_DELAY_MILLIS = 1_500L
-private const val DEMO_WIDTH = 960
-private const val DEMO_HEIGHT = 540
-private const val PLACEHOLDER_WIDTH = 240
-private const val PLACEHOLDER_HEIGHT = 160
