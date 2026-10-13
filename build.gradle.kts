@@ -115,6 +115,15 @@ dependencies {
     standalone(serializationCore)
     standalone(serializationJson)
     standalone(kotlin("reflect"))
+
+    // The tests only cover the parts of this backend that have no window in them - the language
+    // lookup and the projection arithmetic - and both of them read the core library: the first its
+    // language files, the second its `Transform`. A jar file dependency brings no transitive
+    // dependency with it, so what the core needs at runtime is named here as well.
+    testImplementation(kotlin("test"))
+    testImplementation(coreLibrary)
+    testImplementation(slf4j)
+    testImplementation(serializationJson)
 }
 
 kotlin {
@@ -155,6 +164,10 @@ sourcesJar.from("LICENSE")
 
 tasks.jar {
     from("LICENSE")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.processResources {
