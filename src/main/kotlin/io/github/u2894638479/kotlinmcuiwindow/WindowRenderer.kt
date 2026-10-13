@@ -32,6 +32,9 @@ import java.awt.geom.Rectangle2D
  *   and anything else falls back to the diagonal,
  * - **per-vertex colour interpolation** does not exist in Java2D at all, so [renderTriangles] shades
  *   each triangle flat,
+ * - **a perspective is projected by hand**: `AffineTransform` has six numbers and a projective third
+ *   row has nowhere to go in it, so the corners of a quad or triangle are projected and filled flat,
+ *   and anything that is not a quad or a triangle - text, above all - stays affine under it,
  * - **Minecraft's textures are never read**: the widget backgrounds and the item stand-in below are
  *   drawn from this backend's own palette, because a window that is not a game window has no
  *   resource pack to read them from.
@@ -66,6 +69,20 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
         if (r <= l || b <= t) return
         val graphics = renderParam.graphics
         val area = Rectangle2D.Float(l, t, r - l, b - t)
+        val perspective = renderParam.perspective
+        if (perspective != null) {
+            // Projected by hand and filled flat: see the class comment. The corners come out in
+            // perimeter order, which is what makes one path out of them.
+            val matrix = graphics.transform
+            val xs = FloatArray(4)
+            val ys = FloatArray(4)
+            putProjected(matrix, perspective, 0, l, t, xs, ys)
+            putProjected(matrix, perspective, 1, r, t, xs, ys)
+            putProjected(matrix, perspective, 2, r, b, xs, ys)
+            putProjected(matrix, perspective, 3, l, b, xs, ys)
+            fillPolygon(xs, ys, averageOf(lt, rt, lb, rb).awt())
+            return
+        }
         val texture = if (image == null || image.isEmpty || uv == null) null else WindowTextures.get(image)
         val source = if (texture == null) null else uv?.bounds()
         if (texture == null || source == null) {
@@ -107,6 +124,7 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
         // A malformed list is a caller bug; drawing nothing beats drawing garbage.
         if (colors.size * stride != vertices.size || colors.size % 3 != 0) return
         val graphics = renderParam.graphics
+        val perspective = renderParam.perspective
         var vertex = 0
         var color = 0
         while (vertex < vertices.size) {
@@ -116,7 +134,15 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
             val y1 = vertices[vertex + stride + 1]
             val x2 = vertices[vertex + stride * 2]
             val y2 = vertices[vertex + stride * 2 + 1]
-            if (texture == null) {
+            if (perspective != null) {
+                val matrix = graphics.transform
+                val xs = FloatArray(3)
+                val ys = FloatArray(3)
+                putProjected(matrix, perspective, 0, x0, y0, xs, ys)
+                putProjected(matrix, perspective, 1, x1, y1, xs, ys)
+                putProjected(matrix, perspective, 2, x2, y2, xs, ys)
+                fillPolygon(xs, ys, averageOf(colors[color], colors[color + 1], colors[color + 2]))
+            } else if (texture == null) {
                 // Java2D's 2-D API has no Gouraud shading: a triangle is one flat colour. The mean of
                 // the three vertex colours is the closest a single fill can get, and it keeps a
                 // gradient across a triangle fan monotonic instead of snapping to the apex colour.
@@ -259,11 +285,22 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
 
     context(renderParam: WindowRenderParam)
     override fun withTransform(transform: Transform, block: () -> Unit) {
+        val next = transform.run { WindowPerspective(m00, m01, m02, m10, m11, m12, m20, m21, m22) }
+        // `AffineTransform` carries six numbers, so a projective third row has nowhere to go in it:
+        // such a transform stays out of the graphics state and the renderer projects the corners
+        // itself. An affine transform - the overwhelming majority - is handed to Java2D as before.
+        if (!next.isAffine) {
+            val previous = renderParam.perspective
+            renderParam.perspective = previous?.concat(next) ?: next
+            try {
+                block()
+            } finally {
+                renderParam.perspective = previous
+            }
+            return
+        }
         val graphics = renderParam.graphics
         val saved = graphics.transform
-        // The 3x3 homogeneous matrix maps onto AffineTransform directly. Its third row is a
-        // perspective, which Java2D cannot represent at all - a software 2D renderer has no
-        // projective stage - so that part is dropped, exactly as the batched Minecraft path drops it.
         graphics.transform(
             AffineTransform(
                 transform.m00.toDouble(), transform.m10.toDouble(),
@@ -307,6 +344,46 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
             lineTo(x2, y2)
             closePath()
         }
+
+    /**
+     * One corner of a projected shape: the perspective first, then the affine state the graphics is
+     * already in, which is what puts the corner in device space.
+     */
+    private fun putProjected(
+        matrix: AffineTransform,
+        perspective: WindowPerspective,
+        index: Int,
+        x: Float,
+        y: Float,
+        xs: FloatArray,
+        ys: FloatArray,
+    ) {
+        val point = Point2D.Float(perspective.projectX(x, y), perspective.projectY(x, y))
+        matrix.transform(point, point)
+        xs[index] = point.x
+        ys[index] = point.y
+    }
+
+    /** Fill a shape whose corners are already in device space, with one flat colour. */
+    context(renderParam: WindowRenderParam)
+    private fun fillPolygon(xs: FloatArray, ys: FloatArray, color: java.awt.Color) {
+        val graphics = renderParam.graphics
+        val savedTransform = graphics.transform
+        val savedPaint = graphics.paint
+        // Device space already: the fill must not be transformed a second time.
+        graphics.transform = AffineTransform()
+        graphics.paint = color
+        try {
+            val path = Path2D.Float()
+            path.moveTo(xs[0], ys[0])
+            for (index in 1 until xs.size) path.lineTo(xs[index], ys[index])
+            path.closePath()
+            graphics.fill(path)
+        } finally {
+            graphics.paint = savedPaint
+            graphics.transform = savedTransform
+        }
+    }
 
     context(renderParam: WindowRenderParam)
     private fun outline(rect: Rect, color: Color) {

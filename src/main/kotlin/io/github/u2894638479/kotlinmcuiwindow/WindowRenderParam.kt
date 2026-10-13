@@ -25,4 +25,12 @@ class WindowRenderParam(
     /** The rectangle the framework last clipped to, or `null` while nothing is clipped. */
     var clip: Rect? = null
         internal set
+
+    /**
+     * The perspective in effect, or `null` while every transform is affine.
+     *
+     * Java2D cannot hold a third row, so a projective transform stays out of [graphics] entirely and
+     * the renderer projects the corners itself; [transform] therefore never reports it.
+     */
+    internal var perspective: WindowPerspective? = null
 }
