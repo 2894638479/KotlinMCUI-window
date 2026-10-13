@@ -197,7 +197,11 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
     context(renderParam: WindowRenderParam, ctx: DslScaleContext)
     override fun renderButton(rect: Rect, highlighted: Boolean, active: Boolean, color: Color) {
         if (rect.isEmpty) return
+        // One plate per (highlighted, active) combination: a button that cannot be pressed still has
+        // to show whether the cursor is on it, and the page that exercises this backend draws all
+        // four side by side.
         val surface = when {
+            !active && highlighted -> DISABLED_HOVER
             !active -> DISABLED
             highlighted -> BUTTON_HOVER
             else -> BUTTON
@@ -644,6 +648,7 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
     private val BUTTON_HOVER = Color(200, 200, 200)
     private val BUTTON_BORDER = Color(70, 70, 70)
     private val DISABLED = Color(90, 90, 90)
+    private val DISABLED_HOVER = Color(130, 130, 130)
     private val DISABLED_BORDER = Color(50, 50, 50)
     private val SLOT_INNER = Color(139, 139, 139)
     private val SLOT_BORDER = Color(55, 55, 55)
