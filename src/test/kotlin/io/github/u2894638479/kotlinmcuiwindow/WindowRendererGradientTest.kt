@@ -79,4 +79,26 @@ class WindowRendererGradientTest {
         assertTrue(nearApex[0] > 200 && nearApex[1] < 60 && nearApex[2] < 60, "the apex should be red, was ${nearApex.toList()}")
         assertTrue(nearRight[2] > 200 && nearRight[0] < 60, "the right corner should be blue, was ${nearRight.toList()}")
     }
+
+    @Test
+    fun `a quad shows no line down its middle`() {
+        val (image, graphics) = surface()
+        // Opaque, like the surface the window paints on: a half-covered edge then reads as a dark
+        // line rather than as a dip in alpha that nothing would show.
+        graphics.color = java.awt.Color(20,20,20)
+        graphics.fillRect(0,0,size,size)
+        val white = Color(255,255,255)
+        val hue = Color(255,122,0)
+        val black = Color(0,0,0)
+        context(WindowRenderParam(graphics)) {
+            WindowRenderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black,null,null)
+        }
+        graphics.dispose()
+
+        // Halfway across: a quarter of white, a quarter of the hue and half of black, which is what
+        // the bilinear field gives there. The two-triangle split gave grey, because both halves
+        // interpolate white to black along the diagonal they share.
+        val middle = pixel(image,size / 2,size / 2)
+        assertTrue(distance(middle,intArrayOf(128,94,64)) < 45, "the middle should be the field's colour, was ${middle.toList()}")
+    }
 }

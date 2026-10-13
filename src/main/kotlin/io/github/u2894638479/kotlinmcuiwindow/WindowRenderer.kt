@@ -32,8 +32,8 @@ import kotlin.math.roundToInt
  * "one [renderQuad] plus an approximation for whatever Java2D has no equivalent of". The
  * approximations are named where they are made:
  *
- * - **four independent corner colours** go through two affine triangles that share the top-left to
- *   bottom-right diagonal, which is how a quadrilateral is interpolated everywhere else,
+ * - **four independent corner colours** are one bilinear fill: two triangles would share a diagonal,
+ *   and anti-aliased fills that only half cover it leave a line where the surface shows through,
  * - **per-vertex colour interpolation** is done by hand: the field through three colours is affine,
  *   and a two-by-two image filtered bilinearly reproduces an affine field exactly,
  * - **a perspective is projected by hand**: `AffineTransform` has six numbers and a projective third
@@ -101,11 +101,11 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
                 graphics.paint = paint
                 graphics.fill(area)
             } else {
-                // Four unrelated corners - a two-dimensional palette, say. Two affine triangles over
-                // the top-left to bottom-right diagonal, the way a quadrilateral is interpolated
-                // everywhere else, so all four corners reach the pixels.
-                fillGouraud(graphics, l, t, r, t, r, b, lt.rgbaInt, rt.rgbaInt, rb.rgbaInt)
-                fillGouraud(graphics, l, t, r, b, l, b, lt.rgbaInt, rb.rgbaInt, lb.rgbaInt)
+                // Four unrelated corners - a two-dimensional palette, say. One fill over the whole
+                // rectangle: two triangles would share the diagonal, and Java2D anti-aliases each
+                // fill on its own, so the two would cover half of its pixels each and leave the
+                // surface behind showing through as a line.
+                fillBilinear(graphics, l, t, r, b, lt, rt, lb, rb)
             }
             return
         }
@@ -418,6 +418,59 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
         fillRect(Rect(l.px, b.px - BORDER_WIDTH, r.px, b.px), color)
         fillRect(Rect(l.px, t.px, l.px + BORDER_WIDTH, b.px), color)
         fillRect(Rect(r.px - BORDER_WIDTH, t.px, r.px, b.px), color)
+    }
+
+    /**
+     * Fill a rectangle with the bilinear field that runs through its four corner colours.
+     *
+     * One shape rather than two triangles: Java2D anti-aliases each fill separately, so two fills
+     * sharing a diagonal cover only half of the pixels along it and whatever is behind shows through
+     * as a line. A single fill has no internal edge at all, and the crease a two-triangle split
+     * leaves is gone with it.
+     */
+    private fun fillBilinear(graphics: Graphics2D, l: Float, t: Float, r: Float, b: Float, lt: Color, rt: Color, lb: Color, rb: Color) {
+        val stepX = (r - l) / (GOURAUD_SIZE - 2f)
+        val stepY = (b - t) / (GOURAUD_SIZE - 2f)
+        val originX = l - stepX
+        val originY = t - stepY
+        val pixels = gouraudPixels
+        for (y in 0 until GOURAUD_SIZE) {
+            // The margin is one texel wide, so the field is evaluated slightly outside the rectangle.
+            val v = (originY + (y + 0.5f) * stepY - t) / (b - t)
+            for (x in 0 until GOURAUD_SIZE) {
+                val u = (originX + (x + 0.5f) * stepX - l) / (r - l)
+                pixels[y * GOURAUD_SIZE + x] = bilinear(lt, rt, lb, rb, u, v)
+            }
+        }
+        gouraudImage.setRGB(0, 0, GOURAUD_SIZE, GOURAUD_SIZE, pixels, 0, GOURAUD_SIZE)
+        val savedPaint = graphics.paint
+        val savedHint = graphics.getRenderingHint(RenderingHints.KEY_INTERPOLATION)
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+        graphics.paint = TexturePaint(
+            gouraudImage,
+            Rectangle2D.Float(originX, originY, stepX * GOURAUD_SIZE, stepY * GOURAUD_SIZE),
+        )
+        graphics.fill(Rectangle2D.Float(l, t, r - l, b - t))
+        graphics.paint = savedPaint
+        graphics.setRenderingHint(
+            RenderingHints.KEY_INTERPOLATION,
+            savedHint ?: RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR,
+        )
+    }
+
+    /** The bilinear field through four corner colours at ([u],[v]) of the rectangle. */
+    private fun bilinear(lt: Color, rt: Color, lb: Color, rb: Color, u: Float, v: Float): Int {
+        fun channel(a: Int, b: Int, c: Int, d: Int): Int {
+            val top = a + u * (b - a)
+            val bottom = c + u * (d - c)
+            return (top + v * (bottom - top)).roundToInt().coerceIn(0, 255)
+        }
+        return Color(
+            channel(lt.rInt, rt.rInt, lb.rInt, rb.rInt),
+            channel(lt.gInt, rt.gInt, lb.gInt, rb.gInt),
+            channel(lt.bInt, rt.bInt, lb.bInt, rb.bInt),
+            channel(lt.aInt, rt.aInt, lb.aInt, rb.aInt),
+        ).argbInt
     }
 
     /** Draw a decoded icon into the given bounds, scaled with nearest-neighbour so it stays crisp. */
