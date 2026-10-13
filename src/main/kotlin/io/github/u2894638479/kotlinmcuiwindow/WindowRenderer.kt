@@ -13,13 +13,17 @@ import io.github.u2894638479.kotlinmcui.text.DslCharStyle
 import io.github.u2894638479.kotlinmcui.text.DslFont
 import io.github.u2894638479.kotlinmcui.text.DslRenderableChar
 import java.awt.AlphaComposite
+import java.awt.Graphics2D
 import java.awt.LinearGradientPaint
 import java.awt.Paint
+import java.awt.RenderingHints
 import java.awt.TexturePaint
 import java.awt.geom.AffineTransform
 import java.awt.geom.Path2D
 import java.awt.geom.Point2D
 import java.awt.geom.Rectangle2D
+import java.awt.image.BufferedImage
+import kotlin.math.roundToInt
 
 /**
  * Java2D implementation of the rendering contract.
@@ -28,10 +32,10 @@ import java.awt.geom.Rectangle2D
  * "one [renderQuad] plus an approximation for whatever Java2D has no equivalent of". The
  * approximations are named where they are made:
  *
- * - **four independent corner colours** have no Java2D primitive; an axis-aligned gradient is exact
- *   and anything else falls back to the diagonal,
- * - **per-vertex colour interpolation** does not exist in Java2D at all, so [renderTriangles] shades
- *   each triangle flat,
+ * - **four independent corner colours** go through two affine triangles that share the top-left to
+ *   bottom-right diagonal, which is how a quadrilateral is interpolated everywhere else,
+ * - **per-vertex colour interpolation** is done by hand: the field through three colours is affine,
+ *   and a two-by-two image filtered bilinearly reproduces an affine field exactly,
  * - **a perspective is projected by hand**: `AffineTransform` has six numbers and a projective third
  *   row has nowhere to go in it, so the corners of a quad or triangle are projected and filled flat,
  *   and anything that is not a quad or a triangle - text, above all - stays affine under it,
@@ -39,6 +43,9 @@ import java.awt.geom.Rectangle2D
  *   drawn from this backend's own palette, because a window that is not a game window has no
  *   resource pack to read them from.
  */
+/** The resolution of a Gouraud texture: an affine field needs no more than a few samples per axis. */
+private const val GOURAUD_SIZE = 32
+
 internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
     /**
      * The surface the scale is derived from, set by [WindowBackend.paint] before every frame so it is
@@ -89,8 +96,17 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
         val texture = if (image == null || image.isEmpty || uv == null) null else WindowTextures.get(image)
         val source = if (texture == null) null else uv?.bounds()
         if (texture == null || source == null) {
-            graphics.paint = gradientPaint(l, t, r, b, lt, rt, lb, rb)
-            graphics.fill(area)
+            val paint = gradientPaint(l, t, r, b, lt, rt, lb, rb)
+            if (paint != null) {
+                graphics.paint = paint
+                graphics.fill(area)
+            } else {
+                // Four unrelated corners - a two-dimensional palette, say. Two affine triangles over
+                // the top-left to bottom-right diagonal, the way a quadrilateral is interpolated
+                // everywhere else, so all four corners reach the pixels.
+                fillGouraud(graphics, l, t, r, t, r, b, lt.rgbaInt, rt.rgbaInt, rb.rgbaInt)
+                fillGouraud(graphics, l, t, r, b, l, b, lt.rgbaInt, rb.rgbaInt, lb.rgbaInt)
+            }
             return
         }
         val (u0, v0, u1, v1) = source
@@ -146,11 +162,7 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
                 putProjected(matrix, perspective, 2, x2, y2, xs, ys)
                 fillPolygon(xs, ys, averageOf(colors[color], colors[color + 1], colors[color + 2]))
             } else if (texture == null) {
-                // Java2D's 2-D API has no Gouraud shading: a triangle is one flat colour. The mean of
-                // the three vertex colours is the closest a single fill can get, and it keeps a
-                // gradient across a triangle fan monotonic instead of snapping to the apex colour.
-                graphics.color = averageOf(colors[color], colors[color + 1], colors[color + 2])
-                graphics.fill(triangle(x0, y0, x1, y1, x2, y2))
+                fillGouraud(graphics, x0, y0, x1, y1, x2, y2, colors[color], colors[color + 1], colors[color + 2])
             } else {
                 val u0 = vertices[vertex + 2]
                 val v0 = vertices[vertex + 3]
@@ -398,19 +410,97 @@ internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
         fillRect(Rect(r.px - BORDER_WIDTH, t.px, r.px, b.px), color)
     }
 
-    private fun gradientPaint(l: Float, t: Float, r: Float, b: Float, lt: Color, rt: Color, lb: Color, rb: Color): Paint {
+    /** The exact paint for the corner combinations Java2D has a primitive for, or `null`. */
+    private fun gradientPaint(l: Float, t: Float, r: Float, b: Float, lt: Color, rt: Color, lb: Color, rb: Color): Paint? {
         if (lt == rt && rt == lb && lb == rb) return lt.awt()
         if (lt == lb && rt == rb) return linear(l, t, r, t, lt, rt)
         if (lt == rt && lb == rb) return linear(l, t, l, b, lt, lb)
-        // Four unrelated corners - a two-dimensional palette, say. Java2D has no bilinear gradient,
-        // so the diagonal is used: its two ends are the exact colours and its midpoint is the mean
-        // of the two corners the diagonal does not pass through.
-        return LinearGradientPaint(
-            Point2D.Float(l, t),
-            Point2D.Float(r, b),
-            floatArrayOf(0f, 0.5f, 1f),
-            arrayOf(lt.awt(), rt.averageWith(lb).change(a = maxOf(rt.aInt, lb.aInt)).let { it.awt() }, rb.awt()),
+        return null
+    }
+
+    /**
+     * The image a Gouraud field is painted through, and the buffer it is evaluated into. One image is
+     * reused: only one field is painted at a time, and painting only happens on the window's thread.
+     */
+    private val gouraudImage = BufferedImage(GOURAUD_SIZE, GOURAUD_SIZE, BufferedImage.TYPE_INT_ARGB)
+    private val gouraudPixels = IntArray(GOURAUD_SIZE * GOURAUD_SIZE)
+
+    /**
+     * Fill a triangle with the affine colour field that runs through its three vertex colours.
+     *
+     * Java2D has no Gouraud shading, but the field through three colours is affine, and that is
+     * exactly what a two-by-two image filtered bilinearly reproduces: its four texels are the field's
+     * values at the corners of the triangle's bounding box, so everything between them interpolates
+     * the same plane. A four-corner quad is two of these.
+     */
+    private fun fillGouraud(
+        graphics: Graphics2D,
+        x0: Float, y0: Float, x1: Float, y1: Float, x2: Float, y2: Float,
+        c0: Int, c1: Int, c2: Int,
+    ) {
+        val dx1 = x1 - x0
+        val dy1 = y1 - y0
+        val dx2 = x2 - x0
+        val dy2 = y2 - y0
+        val area = dx1 * dy2 - dx2 * dy1
+        val left = minOf(x0, x1, x2)
+        val top = minOf(y0, y1, y2)
+        val right = maxOf(x0, x1, x2)
+        val bottom = maxOf(y0, y1, y2)
+        if (area == 0f || !area.isFinite() || right <= left || bottom <= top) {
+            graphics.color = averageOf(c0, c1, c2)
+            graphics.fill(triangle(x0, y0, x1, y1, x2, y2))
+            return
+        }
+        val color0 = Color(c0)
+        val color1 = Color(c1)
+        val color2 = Color(c2)
+        // An affine field is fully described by a small image of it: bilinear filtering between the
+        // samples of an affine function gives that function back. The image is anchored one texel
+        // wider than the triangle on each side, because a texture tiles - without the margin the
+        // filter would reach into the neighbouring copy at the edges.
+        val stepX = (right - left) / (GOURAUD_SIZE - 2f)
+        val stepY = (bottom - top) / (GOURAUD_SIZE - 2f)
+        val originX = left - stepX
+        val originY = top - stepY
+        val pixels = gouraudPixels
+        for (y in 0 until GOURAUD_SIZE) {
+            val py = originY + (y + 0.5f) * stepY - y0
+            for (x in 0 until GOURAUD_SIZE) {
+                val px = originX + (x + 0.5f) * stepX - x0
+                // The barycentric weights of the sample inside the vertex triangle: the colour field
+                // is the same plane, so extrapolating with them is the field, not an approximation.
+                val u1 = (px * dy2 - py * dx2) / area
+                val u2 = (py * dx1 - px * dy1) / area
+                pixels[y * GOURAUD_SIZE + x] = affine(color0, color1, color2, u1, u2)
+            }
+        }
+        gouraudImage.setRGB(0, 0, GOURAUD_SIZE, GOURAUD_SIZE, pixels, 0, GOURAUD_SIZE)
+        val savedPaint = graphics.paint
+        val savedHint = graphics.getRenderingHint(RenderingHints.KEY_INTERPOLATION)
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+        graphics.paint = TexturePaint(
+            gouraudImage,
+            Rectangle2D.Float(originX, originY, stepX * GOURAUD_SIZE, stepY * GOURAUD_SIZE),
         )
+        graphics.fill(triangle(x0, y0, x1, y1, x2, y2))
+        graphics.paint = savedPaint
+        graphics.setRenderingHint(
+            RenderingHints.KEY_INTERPOLATION,
+            savedHint ?: RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR,
+        )
+    }
+
+    /** The affine field through three colours, at the point with barycentric weights [u1] and [u2]. */
+    private fun affine(c0: Color, c1: Color, c2: Color, u1: Float, u2: Float): Int {
+        fun channel(v0: Int, v1: Int, v2: Int) = (v0 + u1 * (v1 - v0) + u2 * (v2 - v0)).roundToInt().coerceIn(0, 255)
+        // ARGB, because the texels go into a Java2D image; the framework packs the other way round.
+        return Color(
+            channel(c0.rInt, c1.rInt, c2.rInt),
+            channel(c0.gInt, c1.gInt, c2.gInt),
+            channel(c0.bInt, c1.bInt, c2.bInt),
+            channel(c0.aInt, c1.aInt, c2.aInt),
+        ).argbInt
     }
 
     private fun linear(x0: Float, y0: Float, x1: Float, y1: Float, from: Color, to: Color): Paint {
