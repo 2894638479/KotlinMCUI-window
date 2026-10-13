@@ -215,6 +215,30 @@ tasks.register<JavaExec>("run") {
     }
 }
 
+/**
+ * The same code as a program of its own.
+ *
+ * The artifact a loader takes is [tasks.jar]: it carries the three metadata files and expects the
+ * core library to be another mod installed next to it. This one is the opposite - everything
+ * `main()` needs is inside it, and the loader metadata is left out, because a jar that carries the
+ * core library must never be dropped into `mods/`: the game would end up with a second copy of it.
+ *
+ * `java -jar build/libs/<name>-standalone.jar` opens the window with no game and no build.
+ */
+val standaloneJar = tasks.register<Jar>("standaloneJar") {
+    group = "build"
+    description = "Packages the window as a runnable jar, with everything its main() needs inside."
+    archiveClassifier = "standalone"
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest { attributes["Main-Class"] = "io.github.u2894638479.kotlinmcuiwindow.StandaloneKt" }
+    from(sourceSets["main"].output)
+    from(standalone.map { if (it.isDirectory) it else zipTree(it) })
+    // A program is not a mod: no loader metadata, so nothing mistakes it for one.
+    exclude("fabric.mod.json","META-INF/mods.toml","META-INF/neoforge.mods.toml")
+}
+
+tasks.named("assemble") { dependsOn(standaloneJar) }
+
 val tag = "v$mod_version"
 
 // A checkout without an `origin` remote - a fresh clone of nothing, a sandbox - has no tag to find
