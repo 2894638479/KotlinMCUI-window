@@ -5,6 +5,7 @@ import io.github.u2894638479.kotlinmcui.container.TopComponent
 import io.github.u2894638479.kotlinmcui.input.Key
 import io.github.u2894638479.kotlinmcui.input.KeyModifiers
 import io.github.u2894638479.kotlinmcui.input.MouseButton
+import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import io.github.u2894638479.kotlinmcui.math.Position
 import io.github.u2894638479.kotlinmcui.math.px
 import io.github.u2894638479.kotlinmcui.math.rect.Rect
@@ -40,30 +41,49 @@ internal object WindowInput : DslBackendInput {
         // position it here.
     }
 
+    /**
+     * Run the framework's handling of one AWT event and report whether it consumed the event.
+     *
+     * Events already arrive on the event dispatch thread, where the tree is built and painted, so
+     * nothing is handed across threads here. What needs protecting is the caller: AWT catches
+     * whatever escapes a listener, so without this a failure in the framework leaves a stack in the
+     * log while the event itself goes unhandled. A failure is logged and reported as "not consumed",
+     * which leaves the window's own handling - Escape, above all - in charge.
+     */
+    private inline fun <T> guarded(what: String, fallback: T, block: () -> T): T =
+        try {
+            block()
+        } catch(e: Exception) {
+            dslLogger.error("kotlinmcui failed to handle $what", e)
+            fallback
+        }
+
     fun mouseMoved(x: Int, y: Int) {
         mouse = Position(x.px, y.px)
-        context(mouse) { TopComponent.mouseMove() }
+        guarded("a cursor move", Unit) { context(mouse) { TopComponent.mouseMove() } }
     }
 
     fun mousePressed(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
         heldButtons.add(button.ordinal)
-        return context(mouse, modifiersOf(event)) { TopComponent.mouseDown(button) }
+        return guarded("a mouse press", false) { context(mouse, modifiersOf(event)) { TopComponent.mouseDown(button) } }
     }
 
     fun mouseReleased(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
         heldButtons.remove(button.ordinal)
-        return context(mouse, modifiersOf(event)) { TopComponent.mouseUp(button) }
+        return guarded("a mouse release", false) { context(mouse, modifiersOf(event)) { TopComponent.mouseUp(button) } }
     }
 
     fun mouseWheel(event: MouseWheelEvent) {
         // AWT counts wheel notches downwards and the framework counts them upwards, which is the
         // direction GLFW reports in.
         val amount = -event.preciseWheelRotation
-        context(mouse) {
-            if (event.isShiftDown) TopComponent.mouseScrollHorizontal(amount)
-            else TopComponent.mouseScrollVertical(amount)
+        guarded("a scroll", Unit) {
+            context(mouse) {
+                if (event.isShiftDown) TopComponent.mouseScrollHorizontal(amount)
+                else TopComponent.mouseScrollVertical(amount)
+            }
         }
     }
 
@@ -72,19 +92,19 @@ internal object WindowInput : DslBackendInput {
         heldKeys.add(key.code)
         // The framework reads a repeat as another press, which is what GLFW's GLFW_REPEAT path does,
         // so a repeated AWT event is passed straight through.
-        return context(modifiersOf(event)) { TopComponent.keyDown(key, event.keyCode) }
+        return guarded("a key press", false) { context(modifiersOf(event)) { TopComponent.keyDown(key, event.keyCode) } }
     }
 
     fun keyReleased(event: KeyEvent): Boolean {
         val key = keyOf(event)
         heldKeys.remove(key.code)
-        return context(modifiersOf(event)) { TopComponent.keyUp(key, event.keyCode) }
+        return guarded("a key release", false) { context(modifiersOf(event)) { TopComponent.keyUp(key, event.keyCode) } }
     }
 
     fun keyTyped(event: KeyEvent): Boolean {
         val typed = event.keyChar
         if (typed == KeyEvent.CHAR_UNDEFINED) return false
-        return context(modifiersOf(event)) { TopComponent.charTyped(typed) }
+        return guarded("a typed character", false) { context(modifiersOf(event)) { TopComponent.charTyped(typed) } }
     }
 
     /** A window that loses focus never sees the key-up, so nothing may stay stuck down. */
