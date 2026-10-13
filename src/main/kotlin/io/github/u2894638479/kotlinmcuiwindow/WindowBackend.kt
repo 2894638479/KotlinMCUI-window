@@ -72,8 +72,10 @@ object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
      */
     internal fun paint(graphics: Graphics2D, width: Int, height: Int) {
         val param = WindowRenderParam(graphics)
-        // The root rect is the whole surface: this backend has no GUI scale, so the framework's
-        // pixels are the window's pixels.
+        // Pages lay out in the surface's pixels and their contents are scaled inside that by the
+        // scale the renderer derives from this same size, so the root rect is simply the surface.
+        WindowRenderer.surfaceWidth = width
+        WindowRenderer.surfaceHeight = height
         TopComponent.rect.apply {
             left = 0.px
             top = 0.px

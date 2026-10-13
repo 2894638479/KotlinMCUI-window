@@ -41,11 +41,14 @@ import java.awt.geom.Rectangle2D
  */
 internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
     /**
-     * 1.0, deliberately: this backend paints in the window's own pixels and has no game GUI scale to
-     * account for, so a page's `scaled` sizes land on real pixels one for one and a screenshot of
-     * the window is a faithful picture of what the framework asked for.
+     * The surface the scale is derived from, set by [WindowBackend.paint] before every frame so it is
+     * always the window's current size. Zero until the first paint, which the formula floors to 1.0.
      */
-    override val guiScale: Double get() = 1.0
+    internal var surfaceWidth: Int = 0
+    internal var surfaceHeight: Int = 0
+
+    /** The scale that makes a page's `.scaled` sizes come out at the current window's proportions. */
+    override val guiScale: Double get() = guiScaleFor(surfaceWidth, surfaceHeight)
 
     context(renderParam: WindowRenderParam)
     override fun flush() {
