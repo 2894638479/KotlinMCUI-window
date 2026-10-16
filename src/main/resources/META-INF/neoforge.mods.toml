@@ -18,6 +18,17 @@ ${mod_description}
 # all, so both metadata files name the icon the same way.
 logoFile = "${icon}"
 
+# Required, because it is the loader above that reads this jar's @Mod class: without Kotlin for
+# Forge there is nothing to construct the entry point. Left to the 5.x line the loader id was
+# verified against (5.12.0 on NeoForge 21.1.219), since its language loader is not stable across
+# major versions.
+[[dependencies.${mod_id}]]
+modId = "kotlinforforge"
+type = "required"
+versionRange = "[5,6)"
+ordering = "NONE"
+side = "CLIENT"
+
 # Same two requirements as the Forge file; NeoForge replaced `mandatory` with `type` in 1.20.5.
 [[dependencies.${mod_id}]]
 modId = "kotlinmcui"
