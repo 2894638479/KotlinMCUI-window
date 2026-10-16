@@ -28,6 +28,8 @@ class WindowInputTest {
     /** Any component will do as an event source; nothing here asks it to be displayable. */
     private val source = JPanel()
 
+    private val input = WindowInput()
+
     private fun keyEvent(
         keyCode: Int,
         modifiers: Int = 0,
@@ -155,42 +157,42 @@ class WindowInputTest {
 
     @Test
     fun `a held key and button are reported down until focus is lost`() {
-        WindowInput.releaseAll()
-        assertFalse(WindowInput.isKeyDown(Key.A))
-        assertFalse(WindowInput.isMouseDown(MouseButton.LEFT.ordinal))
+        input.releaseAll()
+        assertFalse(input.isKeyDown(Key.A))
+        assertFalse(input.isMouseDown(MouseButton.LEFT.ordinal))
 
         // The pressed set is updated before the framework dispatch, which has no page to reach here,
         // so this records the state even though the dispatch itself cannot land.
-        runCatching { WindowInput.keyPressed(keyEvent(KeyEvent.VK_A)) }
-        runCatching { WindowInput.mousePressed(mouseEvent(MouseEvent.BUTTON1)) }
-        assertTrue(WindowInput.isKeyDown(Key.A))
-        assertTrue(WindowInput.isMouseDown(MouseButton.LEFT.ordinal))
+        runCatching { input.keyPressed(keyEvent(KeyEvent.VK_A)) }
+        runCatching { input.mousePressed(mouseEvent(MouseEvent.BUTTON1)) }
+        assertTrue(input.isKeyDown(Key.A))
+        assertTrue(input.isMouseDown(MouseButton.LEFT.ordinal))
 
         // A window that loses the focus never sees the matching release, so it drops everything it held.
-        WindowInput.releaseAll()
-        assertFalse(WindowInput.isKeyDown(Key.A))
-        assertFalse(WindowInput.isMouseDown(MouseButton.LEFT.ordinal))
+        input.releaseAll()
+        assertFalse(input.isKeyDown(Key.A))
+        assertFalse(input.isMouseDown(MouseButton.LEFT.ordinal))
     }
 
     @Test
     fun `a released key stops being reported down`() {
-        WindowInput.releaseAll()
-        runCatching { WindowInput.keyPressed(keyEvent(KeyEvent.VK_A)) }
-        assertTrue(WindowInput.isKeyDown(Key.A))
+        input.releaseAll()
+        runCatching { input.keyPressed(keyEvent(KeyEvent.VK_A)) }
+        assertTrue(input.isKeyDown(Key.A))
 
         runCatching {
-            WindowInput.keyReleased(
+            input.keyReleased(
                 KeyEvent(source, KeyEvent.KEY_RELEASED, 0L, 0, KeyEvent.VK_A, KeyEvent.CHAR_UNDEFINED)
             )
         }
-        assertFalse(WindowInput.isKeyDown(Key.A))
+        assertFalse(input.isKeyDown(Key.A))
     }
 
     @Test
     fun `the cursor position follows the window's own coordinates`() {
         // AWT delivers cursor coordinates in the component's space, which is the space Rect uses.
-        runCatching { WindowInput.mouseMoved(7, 11) }
-        assertEquals(7.0, WindowInput.mouse.x.raw, 0.0)
-        assertEquals(11.0, WindowInput.mouse.y.raw, 0.0)
+        runCatching { input.mouseMoved(7, 11) }
+        assertEquals(7.0, input.mouse.x.raw, 0.0)
+        assertEquals(11.0, input.mouse.y.raw, 0.0)
     }
 }

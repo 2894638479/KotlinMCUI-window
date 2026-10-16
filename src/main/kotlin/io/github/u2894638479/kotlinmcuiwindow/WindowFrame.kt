@@ -51,7 +51,7 @@ import javax.swing.WindowConstants
  */
 internal fun endsPage(stackSize: Int) = stackSize > 1
 
-internal class WindowFrame(private val painter: WindowBackend) {
+internal class WindowFrame(private val painter: WindowBackend, private val input: WindowInput) {
     private companion object {
         /** ~60 frames per second, the same cadence the game's own screen loop runs at. */
         const val FRAME_MILLIS = 16
@@ -265,22 +265,22 @@ internal class WindowFrame(private val painter: WindowBackend) {
             addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(event: MouseEvent) {
                     requestFocusInWindow()
-                    WindowInput.mouseMoved(event.x, event.y)
-                    WindowInput.mousePressed(event)
+                    input.mouseMoved(event.x, event.y)
+                    input.mousePressed(event)
                 }
 
                 override fun mouseReleased(event: MouseEvent) {
-                    WindowInput.mouseReleased(event)
+                    input.mouseReleased(event)
                 }
             })
             addMouseMotionListener(object : MouseMotionAdapter() {
-                override fun mouseMoved(event: MouseEvent) = WindowInput.mouseMoved(event.x, event.y)
-                override fun mouseDragged(event: MouseEvent) = WindowInput.mouseMoved(event.x, event.y)
+                override fun mouseMoved(event: MouseEvent) = input.mouseMoved(event.x, event.y)
+                override fun mouseDragged(event: MouseEvent) = input.mouseMoved(event.x, event.y)
             })
-            addMouseWheelListener { event -> WindowInput.mouseWheel(event) }
+            addMouseWheelListener { event -> input.mouseWheel(event) }
             addKeyListener(object : KeyAdapter() {
                 override fun keyPressed(event: KeyEvent) {
-                    val consumed = WindowInput.keyPressed(event)
+                    val consumed = input.keyPressed(event)
                     // Escape leaves the page, but only a page that did not want it: a page that
                     // consumed the key - to close a dialog of its own, say - has already said what
                     // Escape means here, and the stack must not overrule that.
@@ -288,17 +288,17 @@ internal class WindowFrame(private val painter: WindowBackend) {
                 }
 
                 override fun keyReleased(event: KeyEvent) {
-                    WindowInput.keyReleased(event)
+                    input.keyReleased(event)
                 }
 
                 override fun keyTyped(event: KeyEvent) {
-                    WindowInput.keyTyped(event)
+                    input.keyTyped(event)
                 }
             })
             addFocusListener(object : FocusAdapter() {
                 // A window that loses focus never sees the matching key-up, so nothing may stay
                 // reported as held down.
-                override fun focusLost(event: FocusEvent) = WindowInput.releaseAll()
+                override fun focusLost(event: FocusEvent) = input.releaseAll()
             })
         }
 

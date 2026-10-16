@@ -40,23 +40,23 @@ fun main(args: Array<String>) {
     dslLogger.info("standalone: window shown with the entry list at the bottom of its stack")
 
     // A preview session photographs and quits on its own; this path is for a plain standalone run.
-    if (captureName != null && preview == null) captureAndExit(captureName)
+    if (captureName != null && preview == null) captureAndExit(backend, captureName)
 }
 
-private fun captureAndExit(fileName: String) {
+private fun captureAndExit(backend: WindowBackend, fileName: String) {
     val delay = System.getProperty(CAPTURE_DELAY_PROPERTY)?.toLongOrNull() ?: DEFAULT_CAPTURE_DELAY_MILLIS
     // A daemon thread: the window's own event dispatch thread is what keeps the process alive, and
     // this one only has to wait for the page to have painted before photographing it.
     Thread {
         Thread.sleep(delay)
-        val file = runBlocking { WindowUtils.capture(fileName) }
+        val file = runBlocking { backend.capture(fileName) }
         if (file == null) {
             dslLogger.error("standalone: no screenshot was written for '$fileName'")
-            WindowUtils.quit(1)
+            backend.quit(1)
             return@Thread
         }
         dslLogger.info("standalone: wrote ${file.absolutePath}")
-        WindowUtils.quit(0)
+        backend.quit(0)
     }.apply {
         isDaemon = true
         name = "kotlinmcuiwindow-capture"

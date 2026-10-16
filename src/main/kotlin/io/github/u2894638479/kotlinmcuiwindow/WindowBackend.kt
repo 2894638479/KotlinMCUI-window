@@ -32,21 +32,24 @@ import java.awt.Graphics2D
  * is per-instance so far; the frame, the input and the utilities still live in one place and move
  * the same way next.
  */
-class WindowBackend internal constructor(private val renderer: WindowRenderer = WindowRenderer()) :
+class WindowBackend internal constructor(
+    private val renderer: WindowRenderer = WindowRenderer(),
+    private val input: WindowInput = WindowInput(),
+    private val utils: WindowUtils = WindowUtils(),
+) :
     DslBackend<WindowRenderParam, WindowScreen>,
     DslBackendRenderer<WindowRenderParam> by renderer,
     DslBackendMetadata by WindowMetadata,
-    DslBackendUtils by WindowUtils,
-    DslBackendInput by WindowInput
+    DslBackendUtils by utils,
+    DslBackendInput by input
 {
     /** The window this backend paints into, and the page stack inside it. */
-    private val frame = WindowFrame(this)
+    private val frame = WindowFrame(this, input)
 
     init {
-        // Temporary bridge: the utilities are still one object, so they photograph and close "the"
-        // window. This becomes their constructor parameter when they become one per root, and then
-        // this line goes away.
-        WindowUtils.frame = frame
+        // The window needs its backend to paint into it, and the utilities need the window to
+        // photograph and close, so the frame is attached here, where both exist.
+        utils.frame = frame
     }
 
     /**
@@ -97,7 +100,7 @@ class WindowBackend internal constructor(private val renderer: WindowRenderer = 
             right = width.px
             bottom = height.px
         }
-        context(this, param, WindowInput.mouse) { TopComponent.render() }
+        context(this, param, input.mouse) { TopComponent.render() }
         context(param) { flush() }
     }
 

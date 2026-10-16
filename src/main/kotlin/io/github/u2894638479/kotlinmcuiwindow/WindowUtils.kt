@@ -25,13 +25,12 @@ import kotlin.system.exitProcess
  * game, because there is no game to ask. [translate] answers from the framework's own language
  * files, which travel in the core library's jar and are therefore on this classpath already.
  */
-internal object WindowUtils : DslBackendUtils {
+internal class WindowUtils : DslBackendUtils {
     /**
-     * The window this object photographs and closes.
+     * The window these utilities photograph and close.
      *
-     * Set by the backend that owns the window, because the utilities are still one object without a
-     * window of their own. When they become one per root this field is the constructor parameter it
-     * looks like, and it disappears.
+     * The window needs its backend to paint into it and the backend needs its utilities, so the two
+     * are wired together right after both exist rather than through the constructor.
      */
     var frame: WindowFrame? = null
 
@@ -54,9 +53,9 @@ internal object WindowUtils : DslBackendUtils {
 
     override val isInWorld: Boolean get() = false
 
-    override fun loadLocalImage(file: File): ImageHolder = holders.getOrPut(file) { holderFor(file) }
+    override fun loadLocalImage(file: File): ImageHolder = WindowCaches.holders.getOrPut(file) { holderFor(file) }
 
-    override fun forceLoadLocalImage(file: File): ImageHolder = holderFor(file).also { holders[file] = it }
+    override fun forceLoadLocalImage(file: File): ImageHolder = holderFor(file).also { WindowCaches.holders[file] = it }
 
     override fun playButtonSound() {
         // A window has no UI sound set. The only sound the platform can make is a system beep, which
@@ -82,7 +81,6 @@ internal object WindowUtils : DslBackendUtils {
         exitProcess(exitCode)
     }
 
-    private val holders = HashMap<File, ImageHolder>()
 
     /**
      * A local image needs no upload step here, so it is read on the spot and the framework gets a

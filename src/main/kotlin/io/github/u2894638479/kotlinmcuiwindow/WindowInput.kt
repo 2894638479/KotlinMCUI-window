@@ -28,7 +28,7 @@ import java.awt.event.MouseWheelEvent
  * functions of one event and share nothing with the state this object keeps, so a second window
  * needs its own state without needing its own copy of the table.
  */
-internal object WindowInput : DslBackendInput {
+internal class WindowInput : DslBackendInput {
     override var mouse = Position(0.px, 0.px)
         private set
 

@@ -344,9 +344,8 @@ internal class WindowRenderer : DslBackendRenderer<WindowRenderParam> {
         }
     }
 
-    override fun getFont(name: String?): DslFont<WindowRenderParam> = fonts.getOrPut(name) { WindowFont(name) }
+    override fun getFont(name: String?): DslFont<WindowRenderParam> = WindowCaches.fonts.getOrPut(name) { WindowFont(name) }
 
-    private val fonts = HashMap<String?, DslFont<WindowRenderParam>>()
 
     /** The four edges of [rect] as floats, or `null` when any of them is not a plain number. */
     private fun Rect.bounds(): FloatArray? {
