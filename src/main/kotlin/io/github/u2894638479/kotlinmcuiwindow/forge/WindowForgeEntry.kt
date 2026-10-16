@@ -1,6 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow.forge
 
 import io.github.u2894638479.kotlinmcui.backend.DslRuntime
+import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import io.github.u2894638479.kotlinmcuiwindow.WindowBackend
 import net.minecraftforge.fml.common.Mod
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent
@@ -24,6 +25,9 @@ private const val MOD_ID = "kotlinmcuiwindow"
  * warning points at does not exist in that version.
  *
  * Nothing here touches a Minecraft class, so the constructor cannot run before the game is ready.
+ *
+ * Only the call that publishes may put a window up: if another backend was published first, the
+ * framework in this process is that backend's, so this one stays down and says so.
  */
 @Mod(MOD_ID)
 @Suppress("DEPRECATION")
@@ -36,9 +40,12 @@ class WindowForgeEntry {
     }
 
     private fun clientSetup() {
-        DslRuntime.platformReady { WindowBackend }
         // The window goes up here rather than from the constructor: by this point the headless
         // backend has installed the framework, so the entry list it opens with has entries to list.
+        if (!DslRuntime.platformReady { WindowBackend }) {
+            dslLogger.warn("window: another backend was published first; this window stays down")
+            return
+        }
         WindowBackend.open()
     }
 }
