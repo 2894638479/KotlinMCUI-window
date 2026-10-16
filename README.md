@@ -2,7 +2,7 @@
 
 自带窗口的 KotlinMCUI 后端：自己开一个 Swing 窗口，用 Java2D 把界面画出来，鼠标与键盘事件也由它自己收。modid 是 `kotlinmcuiwindow`。
 
-它**不引用任何 Minecraft 类**，所以一个 jar 同时覆盖三个加载器、也不绑定游戏版本：jar 内同时带 fabric、forge、neoforge 三份元数据，各指向自己的入口类。它也能在完全不装游戏的情况下单独运行。
+它**不引用任何 Minecraft 类**，所以一个 jar 同时覆盖三个加载器、三份元数据也都不写游戏版本上限：jar 内同时带 fabric、forge、neoforge 三份元数据，各指向自己的入口类。支持范围见下面的[支持范围与依赖](#支持范围与依赖)。它也能在完全不装游戏的情况下单独运行。
 
 它与无界面后端（modid `kotlinmcuibackend`）配对使用：无界面那份负责 `install`（元数据与入口发现），这一份负责发布真正会渲染的后端。无界面后端发现 `kotlinmcuiwindow` 已安装时会保持沉默，把发布权让出来。两者之间没有编译依赖，只有元数据里声明的配对。
 
@@ -64,10 +64,20 @@ java -Dkotlinmcui.preview=<页面引用> -Dkotlinmcui.preview.capture=true `
 
 `-Dkotlinmcuiwindow.capture.delay` 是截图前的等待时间（默认 1500 毫秒），用来等页面画完第一帧。
 
-## 依赖
+## 支持范围与依赖
 
-- 核心库 `kotlinmcui` 与本仓库同时发布，缺一不可（页面写给它，入口发现靠无界面后端）。
-- Kotlin 运行期由平台侧提供，这个 jar 里没有 kotlin-stdlib：Fabric 那份要求 `fabric-language-kotlin`，NeoForge 那份声明 `modLoader = "kotlinforforge"`，Forge 那份用 `javafml`。
+**Minecraft 1.13 及以上**的三个加载器。这个 jar 里没有任何 Minecraft 引用，所以三份元数据都刻意不写游戏版本上限——需要在哪个版本上验证，由平台侧决定，而不是由这里写死一个区间。
+
+legacy Forge（1.7.10–1.12.2）**不覆盖**：那需要另一套注解属性式 `@Mod` 与 `mcmod.info`，这条线目前未验证，专门做 legacy 的后端线也还没跑通，所以这里不去声明它。
+
+依赖：
+
+- 核心库 `kotlinmcui`：与本仓库同时发布，缺一不可（页面写给它）。
+- 无界面后端 `kotlinmcuibackend`：也是必需的，它负责 `install` 与入口发现；在 Forge 上它还把 Kotlin 运行期带进同一 mod 层。
+- Kotlin 运行期由平台侧提供，**这个 jar 里没有 kotlin-stdlib**：
+  - Fabric 那份要求 `fabric-language-kotlin`。
+  - NeoForge 那份把 **Kotlin for Forge** 声明为必需依赖。`modLoader = "kotlinforforge"` 指定的语言加载器就是它——没有它，连这个 jar 里的 `@Mod` 类都没人去构造，加载会在进入 mod 构造期之前失败。实测组合：NeoForge 21.1.219 + Kotlin for Forge 5.12.0。依赖区间收在 5.x 线内，因为那个语言加载器跨大版本变过。
+  - Forge 那份用 `javafml`，不需要额外声明 Kotlin 提供方，Kotlin 由同一层的无界面后端提供。
 
 ## 开发文档
 
