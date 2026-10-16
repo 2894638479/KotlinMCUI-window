@@ -39,71 +39,71 @@ class WindowInputTest {
 
     @Test
     fun `the named keys map to the framework's own constants`() {
-        assertEquals(Key.ENTER, WindowInput.keyOf(keyEvent(KeyEvent.VK_ENTER)))
-        assertEquals(Key.ESCAPE, WindowInput.keyOf(keyEvent(KeyEvent.VK_ESCAPE)))
-        assertEquals(Key.BACKSPACE, WindowInput.keyOf(keyEvent(KeyEvent.VK_BACK_SPACE)))
-        assertEquals(Key.DELETE, WindowInput.keyOf(keyEvent(KeyEvent.VK_DELETE)))
-        assertEquals(Key.TAB, WindowInput.keyOf(keyEvent(KeyEvent.VK_TAB)))
-        assertEquals(Key.LEFT, WindowInput.keyOf(keyEvent(KeyEvent.VK_LEFT)))
-        assertEquals(Key.RIGHT, WindowInput.keyOf(keyEvent(KeyEvent.VK_RIGHT)))
-        assertEquals(Key.UP, WindowInput.keyOf(keyEvent(KeyEvent.VK_UP)))
-        assertEquals(Key.DOWN, WindowInput.keyOf(keyEvent(KeyEvent.VK_DOWN)))
-        assertEquals(Key.HOME, WindowInput.keyOf(keyEvent(KeyEvent.VK_HOME)))
-        assertEquals(Key.END, WindowInput.keyOf(keyEvent(KeyEvent.VK_END)))
-        assertEquals(Key.PAGE_UP, WindowInput.keyOf(keyEvent(KeyEvent.VK_PAGE_UP)))
-        assertEquals(Key.PAGE_DOWN, WindowInput.keyOf(keyEvent(KeyEvent.VK_PAGE_DOWN)))
-        assertEquals(Key.INSERT, WindowInput.keyOf(keyEvent(KeyEvent.VK_INSERT)))
+        assertEquals(Key.ENTER, keyOf(keyEvent(KeyEvent.VK_ENTER)))
+        assertEquals(Key.ESCAPE, keyOf(keyEvent(KeyEvent.VK_ESCAPE)))
+        assertEquals(Key.BACKSPACE, keyOf(keyEvent(KeyEvent.VK_BACK_SPACE)))
+        assertEquals(Key.DELETE, keyOf(keyEvent(KeyEvent.VK_DELETE)))
+        assertEquals(Key.TAB, keyOf(keyEvent(KeyEvent.VK_TAB)))
+        assertEquals(Key.LEFT, keyOf(keyEvent(KeyEvent.VK_LEFT)))
+        assertEquals(Key.RIGHT, keyOf(keyEvent(KeyEvent.VK_RIGHT)))
+        assertEquals(Key.UP, keyOf(keyEvent(KeyEvent.VK_UP)))
+        assertEquals(Key.DOWN, keyOf(keyEvent(KeyEvent.VK_DOWN)))
+        assertEquals(Key.HOME, keyOf(keyEvent(KeyEvent.VK_HOME)))
+        assertEquals(Key.END, keyOf(keyEvent(KeyEvent.VK_END)))
+        assertEquals(Key.PAGE_UP, keyOf(keyEvent(KeyEvent.VK_PAGE_UP)))
+        assertEquals(Key.PAGE_DOWN, keyOf(keyEvent(KeyEvent.VK_PAGE_DOWN)))
+        assertEquals(Key.INSERT, keyOf(keyEvent(KeyEvent.VK_INSERT)))
     }
 
     @Test
     fun `letters and digits are ordered the way the framework orders them`() {
         // AWT and the framework both count upwards, but from different origins, so the whole span has
         // to be shifted rather than the two ends special cased.
-        assertEquals(Key.A, WindowInput.keyOf(keyEvent(KeyEvent.VK_A)))
-        assertEquals(Key.M, WindowInput.keyOf(keyEvent(KeyEvent.VK_M)))
-        assertEquals(Key.Z, WindowInput.keyOf(keyEvent(KeyEvent.VK_Z)))
-        assertEquals(Key.N0, WindowInput.keyOf(keyEvent(KeyEvent.VK_0)))
-        assertEquals(Key.N5, WindowInput.keyOf(keyEvent(KeyEvent.VK_5)))
-        assertEquals(Key.N9, WindowInput.keyOf(keyEvent(KeyEvent.VK_9)))
+        assertEquals(Key.A, keyOf(keyEvent(KeyEvent.VK_A)))
+        assertEquals(Key.M, keyOf(keyEvent(KeyEvent.VK_M)))
+        assertEquals(Key.Z, keyOf(keyEvent(KeyEvent.VK_Z)))
+        assertEquals(Key.N0, keyOf(keyEvent(KeyEvent.VK_0)))
+        assertEquals(Key.N5, keyOf(keyEvent(KeyEvent.VK_5)))
+        assertEquals(Key.N9, keyOf(keyEvent(KeyEvent.VK_9)))
     }
 
     @Test
     fun `function keys cover the whole f1 to f12 span`() {
-        assertEquals(Key.F1, WindowInput.keyOf(keyEvent(KeyEvent.VK_F1)))
-        assertEquals(Key.F6, WindowInput.keyOf(keyEvent(KeyEvent.VK_F6)))
-        assertEquals(Key.F12, WindowInput.keyOf(keyEvent(KeyEvent.VK_F12)))
+        assertEquals(Key.F1, keyOf(keyEvent(KeyEvent.VK_F1)))
+        assertEquals(Key.F6, keyOf(keyEvent(KeyEvent.VK_F6)))
+        assertEquals(Key.F12, keyOf(keyEvent(KeyEvent.VK_F12)))
     }
 
     @Test
     fun `modifier keys are told apart by their location`() {
-        assertEquals(Key.LEFT_SHIFT, WindowInput.keyOf(keyEvent(KeyEvent.VK_SHIFT, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
-        assertEquals(Key.RIGHT_SHIFT, WindowInput.keyOf(keyEvent(KeyEvent.VK_SHIFT, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
-        assertEquals(Key.LEFT_CTRL, WindowInput.keyOf(keyEvent(KeyEvent.VK_CONTROL, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
-        assertEquals(Key.RIGHT_CTRL, WindowInput.keyOf(keyEvent(KeyEvent.VK_CONTROL, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
-        assertEquals(Key.LEFT_ALT, WindowInput.keyOf(keyEvent(KeyEvent.VK_ALT, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
-        assertEquals(Key.RIGHT_ALT, WindowInput.keyOf(keyEvent(KeyEvent.VK_ALT, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
-        assertEquals(Key.LEFT_SUPER, WindowInput.keyOf(keyEvent(KeyEvent.VK_META, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
-        assertEquals(Key.RIGHT_SUPER, WindowInput.keyOf(keyEvent(KeyEvent.VK_META, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
+        assertEquals(Key.LEFT_SHIFT, keyOf(keyEvent(KeyEvent.VK_SHIFT, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
+        assertEquals(Key.RIGHT_SHIFT, keyOf(keyEvent(KeyEvent.VK_SHIFT, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
+        assertEquals(Key.LEFT_CTRL, keyOf(keyEvent(KeyEvent.VK_CONTROL, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
+        assertEquals(Key.RIGHT_CTRL, keyOf(keyEvent(KeyEvent.VK_CONTROL, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
+        assertEquals(Key.LEFT_ALT, keyOf(keyEvent(KeyEvent.VK_ALT, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
+        assertEquals(Key.RIGHT_ALT, keyOf(keyEvent(KeyEvent.VK_ALT, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
+        assertEquals(Key.LEFT_SUPER, keyOf(keyEvent(KeyEvent.VK_META, keyLocation = KeyEvent.KEY_LOCATION_LEFT)))
+        assertEquals(Key.RIGHT_SUPER, keyOf(keyEvent(KeyEvent.VK_META, keyLocation = KeyEvent.KEY_LOCATION_RIGHT)))
     }
 
     @Test
     fun `a locationless modifier counts as the left one`() {
         // AWT leaves the location unknown for events it did not get from a real keyboard, and a page
         // that cannot tell the two apart is better served by an answer than by none.
-        assertEquals(Key.LEFT_SHIFT, WindowInput.keyOf(keyEvent(KeyEvent.VK_SHIFT, keyLocation = KeyEvent.KEY_LOCATION_UNKNOWN)))
+        assertEquals(Key.LEFT_SHIFT, keyOf(keyEvent(KeyEvent.VK_SHIFT, keyLocation = KeyEvent.KEY_LOCATION_UNKNOWN)))
     }
 
     @Test
     fun `a key the framework does not name goes into the extension range`() {
         // AWT's virtual key codes are small: VK_MINUS is 45, which is the framework's Key.P. Passing an
         // unknown code through would answer for a key nobody pressed.
-        val minus = WindowInput.keyOf(keyEvent(KeyEvent.VK_MINUS))
+        val minus = keyOf(keyEvent(KeyEvent.VK_MINUS))
         assertEquals(Key.custom(Key.CUSTOM_RANGE_START + KeyEvent.VK_MINUS), minus)
         assertNotEquals(Key.P, minus)
         assertEquals(Key.P.code, KeyEvent.VK_MINUS, "this is the collision the extension range exists to avoid")
 
         // A function key past F12 is unknown for the same reason, and takes the same road.
-        val f13 = WindowInput.keyOf(keyEvent(KeyEvent.VK_F13))
+        val f13 = keyOf(keyEvent(KeyEvent.VK_F13))
         assertEquals(Key.custom(Key.CUSTOM_RANGE_START + KeyEvent.VK_F13), f13)
         assertTrue(f13.code >= Key.CUSTOM_RANGE_START)
     }
@@ -111,30 +111,30 @@ class WindowInputTest {
     @Test
     fun `mouse buttons follow the shared indices rather than awt's numbers`() {
         // GLFW and SDL count left, right, middle; AWT numbers them left, middle, right.
-        assertEquals(MouseButton.LEFT, WindowInput.buttonOf(mouseEvent(MouseEvent.BUTTON1)))
-        assertEquals(MouseButton.RIGHT, WindowInput.buttonOf(mouseEvent(MouseEvent.BUTTON3)))
-        assertEquals(MouseButton.MIDDLE, WindowInput.buttonOf(mouseEvent(MouseEvent.BUTTON2)))
-        assertEquals(0, WindowInput.buttonOf(mouseEvent(MouseEvent.BUTTON1))?.ordinal)
-        assertEquals(1, WindowInput.buttonOf(mouseEvent(MouseEvent.BUTTON3))?.ordinal)
-        assertEquals(2, WindowInput.buttonOf(mouseEvent(MouseEvent.BUTTON2))?.ordinal)
+        assertEquals(MouseButton.LEFT, buttonOf(mouseEvent(MouseEvent.BUTTON1)))
+        assertEquals(MouseButton.RIGHT, buttonOf(mouseEvent(MouseEvent.BUTTON3)))
+        assertEquals(MouseButton.MIDDLE, buttonOf(mouseEvent(MouseEvent.BUTTON2)))
+        assertEquals(0, buttonOf(mouseEvent(MouseEvent.BUTTON1))?.ordinal)
+        assertEquals(1, buttonOf(mouseEvent(MouseEvent.BUTTON3))?.ordinal)
+        assertEquals(2, buttonOf(mouseEvent(MouseEvent.BUTTON2))?.ordinal)
     }
 
     @Test
     fun `a button past the three awt names keeps counting upwards`() {
         // AWT has no constants for the side buttons: it reports them as numbers, and the index they
         // carry is the one the framework wants.
-        assertEquals(MouseButton.BUTTON4, WindowInput.buttonOf(mouseEvent(4)))
-        assertEquals(MouseButton.BUTTON5, WindowInput.buttonOf(mouseEvent(5)))
+        assertEquals(MouseButton.BUTTON4, buttonOf(mouseEvent(4)))
+        assertEquals(MouseButton.BUTTON5, buttonOf(mouseEvent(5)))
     }
 
     @Test
     fun `an event with no button has no framework button`() {
-        assertNull(WindowInput.buttonOf(mouseEvent(MouseEvent.NOBUTTON)))
+        assertNull(buttonOf(mouseEvent(MouseEvent.NOBUTTON)))
     }
 
     @Test
     fun `the four modifiers come from the event's mask`() {
-        val all = WindowInput.modifiersOf(
+        val all = modifiersOf(
             keyEvent(
                 KeyEvent.VK_A,
                 modifiers = InputEvent.SHIFT_DOWN_MASK or InputEvent.CTRL_DOWN_MASK or
@@ -146,7 +146,7 @@ class WindowInputTest {
         assertTrue(all.alt)
         assertTrue(all.superKey)
 
-        val none = WindowInput.modifiersOf(keyEvent(KeyEvent.VK_A))
+        val none = modifiersOf(keyEvent(KeyEvent.VK_A))
         assertFalse(none.shift)
         assertFalse(none.ctrl)
         assertFalse(none.alt)

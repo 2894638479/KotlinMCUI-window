@@ -23,6 +23,10 @@ import java.awt.event.MouseWheelEvent
  * `held` sets exist because AWT has no "is this key down right now" query: the platform's own
  * `isKeyDown` is not available here, and the alternative - polling a global - would need a native
  * hook a mod jar cannot rely on.
+ *
+ * The translations themselves are the file-level functions below rather than members: they are pure
+ * functions of one event and share nothing with the state this object keeps, so a second window
+ * needs its own state without needing its own copy of the table.
  */
 internal object WindowInput : DslBackendInput {
     override var mouse = Position(0.px, 0.px)
@@ -112,60 +116,60 @@ internal object WindowInput : DslBackendInput {
         heldKeys.clear()
         heldButtons.clear()
     }
-
-    /** Translate an AWT key event to the framework's platform-neutral [Key]. */
-    fun keyOf(event: KeyEvent): Key = when (val code = event.keyCode) {
-        KeyEvent.VK_ENTER -> Key.ENTER
-        KeyEvent.VK_ESCAPE -> Key.ESCAPE
-        KeyEvent.VK_BACK_SPACE -> Key.BACKSPACE
-        KeyEvent.VK_DELETE -> Key.DELETE
-        KeyEvent.VK_TAB -> Key.TAB
-        KeyEvent.VK_LEFT -> Key.LEFT
-        KeyEvent.VK_RIGHT -> Key.RIGHT
-        KeyEvent.VK_UP -> Key.UP
-        KeyEvent.VK_DOWN -> Key.DOWN
-        KeyEvent.VK_HOME -> Key.HOME
-        KeyEvent.VK_END -> Key.END
-        KeyEvent.VK_PAGE_UP -> Key.PAGE_UP
-        KeyEvent.VK_PAGE_DOWN -> Key.PAGE_DOWN
-        KeyEvent.VK_INSERT -> Key.INSERT
-        KeyEvent.VK_SHIFT -> side(event, Key.LEFT_SHIFT, Key.RIGHT_SHIFT)
-        KeyEvent.VK_CONTROL -> side(event, Key.LEFT_CTRL, Key.RIGHT_CTRL)
-        KeyEvent.VK_ALT -> side(event, Key.LEFT_ALT, Key.RIGHT_ALT)
-        KeyEvent.VK_META -> side(event, Key.LEFT_SUPER, Key.RIGHT_SUPER)
-        in KeyEvent.VK_A..KeyEvent.VK_Z -> Key(Key.A.code + (code - KeyEvent.VK_A))
-        in KeyEvent.VK_0..KeyEvent.VK_9 -> Key(Key.N0.code + (code - KeyEvent.VK_0))
-        in KeyEvent.VK_F1..KeyEvent.VK_F12 -> Key(Key.F1.code + (code - KeyEvent.VK_F1))
-        // Anything else goes into the framework's extension range. AWT's virtual key codes are small
-        // - VK_MINUS is 45, which is the framework's Key.P - so passing an unknown code through
-        // unchanged, which the GLFW backend's much larger codes allow, would silently answer for a
-        // named key that was never pressed.
-        else -> Key.custom(Key.CUSTOM_RANGE_START + code)
-    }
-
-    /** Translate an AWT mouse event to the framework's [MouseButton], or `null` for an unknown one. */
-    fun buttonOf(event: MouseEvent): MouseButton? {
-        val index = when (event.button) {
-            MouseEvent.BUTTON1 -> 0
-            MouseEvent.BUTTON3 -> 1
-            MouseEvent.BUTTON2 -> 2
-            else -> event.button - 1
-        }
-        return MouseButton.entries.getOrNull(index)
-    }
-
-    fun modifiersOf(event: InputEvent) = KeyModifiers(
-        shift = event.isShiftDown,
-        ctrl = event.isControlDown,
-        alt = event.isAltDown,
-        superKey = event.isMetaDown,
-        capsLock = lockState(KeyEvent.VK_CAPS_LOCK),
-        numLock = lockState(KeyEvent.VK_NUM_LOCK),
-    )
-
-    /** `Toolkit.getLockingKeyState` is unsupported on some platforms and throws in a headless one. */
-    private fun lockState(key: Int) = runCatching { Toolkit.getDefaultToolkit().getLockingKeyState(key) }.getOrDefault(false)
-
-    private fun side(event: KeyEvent, left: Key, right: Key) =
-        if (event.keyLocation == KeyEvent.KEY_LOCATION_RIGHT) right else left
 }
+
+/** Translate an AWT key event to the framework's platform-neutral [Key]. */
+internal fun keyOf(event: KeyEvent): Key = when (val code = event.keyCode) {
+    KeyEvent.VK_ENTER -> Key.ENTER
+    KeyEvent.VK_ESCAPE -> Key.ESCAPE
+    KeyEvent.VK_BACK_SPACE -> Key.BACKSPACE
+    KeyEvent.VK_DELETE -> Key.DELETE
+    KeyEvent.VK_TAB -> Key.TAB
+    KeyEvent.VK_LEFT -> Key.LEFT
+    KeyEvent.VK_RIGHT -> Key.RIGHT
+    KeyEvent.VK_UP -> Key.UP
+    KeyEvent.VK_DOWN -> Key.DOWN
+    KeyEvent.VK_HOME -> Key.HOME
+    KeyEvent.VK_END -> Key.END
+    KeyEvent.VK_PAGE_UP -> Key.PAGE_UP
+    KeyEvent.VK_PAGE_DOWN -> Key.PAGE_DOWN
+    KeyEvent.VK_INSERT -> Key.INSERT
+    KeyEvent.VK_SHIFT -> side(event, Key.LEFT_SHIFT, Key.RIGHT_SHIFT)
+    KeyEvent.VK_CONTROL -> side(event, Key.LEFT_CTRL, Key.RIGHT_CTRL)
+    KeyEvent.VK_ALT -> side(event, Key.LEFT_ALT, Key.RIGHT_ALT)
+    KeyEvent.VK_META -> side(event, Key.LEFT_SUPER, Key.RIGHT_SUPER)
+    in KeyEvent.VK_A..KeyEvent.VK_Z -> Key(Key.A.code + (code - KeyEvent.VK_A))
+    in KeyEvent.VK_0..KeyEvent.VK_9 -> Key(Key.N0.code + (code - KeyEvent.VK_0))
+    in KeyEvent.VK_F1..KeyEvent.VK_F12 -> Key(Key.F1.code + (code - KeyEvent.VK_F1))
+    // Anything else goes into the framework's extension range. AWT's virtual key codes are small
+    // - VK_MINUS is 45, which is the framework's Key.P - so passing an unknown code through
+    // unchanged, which the GLFW backend's much larger codes allow, would silently answer for a
+    // named key that was never pressed.
+    else -> Key.custom(Key.CUSTOM_RANGE_START + code)
+}
+
+/** Translate an AWT mouse event to the framework's [MouseButton], or `null` for an unknown one. */
+internal fun buttonOf(event: MouseEvent): MouseButton? {
+    val index = when (event.button) {
+        MouseEvent.BUTTON1 -> 0
+        MouseEvent.BUTTON3 -> 1
+        MouseEvent.BUTTON2 -> 2
+        else -> event.button - 1
+    }
+    return MouseButton.entries.getOrNull(index)
+}
+
+internal fun modifiersOf(event: InputEvent) = KeyModifiers(
+    shift = event.isShiftDown,
+    ctrl = event.isControlDown,
+    alt = event.isAltDown,
+    superKey = event.isMetaDown,
+    capsLock = lockState(KeyEvent.VK_CAPS_LOCK),
+    numLock = lockState(KeyEvent.VK_NUM_LOCK),
+)
+
+/** `Toolkit.getLockingKeyState` is unsupported on some platforms and throws in a headless one. */
+private fun lockState(key: Int) = runCatching { Toolkit.getDefaultToolkit().getLockingKeyState(key) }.getOrDefault(false)
+
+private fun side(event: KeyEvent, left: Key, right: Key) =
+    if (event.keyLocation == KeyEvent.KEY_LOCATION_RIGHT) right else left
