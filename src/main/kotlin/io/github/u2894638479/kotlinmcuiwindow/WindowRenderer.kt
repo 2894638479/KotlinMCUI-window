@@ -46,7 +46,7 @@ import kotlin.math.roundToInt
 /** The resolution of a Gouraud texture: an affine field needs no more than a few samples per axis. */
 private const val GOURAUD_SIZE = 32
 
-internal object WindowRenderer : DslBackendRenderer<WindowRenderParam> {
+internal class WindowRenderer : DslBackendRenderer<WindowRenderParam> {
     /**
      * The surface the scale is derived from, set by [WindowBackend.paint] before every frame so it is
      * always the window's current size. Zero until the first paint, which the formula floors to 1.0.

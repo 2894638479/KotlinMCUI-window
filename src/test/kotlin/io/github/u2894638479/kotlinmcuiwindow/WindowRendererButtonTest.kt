@@ -17,11 +17,13 @@ class WindowRendererButtonTest {
     private val width = 40
     private val height = 20
 
+    private val renderer = WindowRenderer()
+
     private fun render(highlighted: Boolean, active: Boolean): List<Int> {
         val image = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
         val graphics = image.createGraphics()
         context(WindowRenderParam(graphics), DslScaleContext(1.0)) {
-            WindowRenderer.renderButton(Rect(0.px, 0.px, width.px, height.px), highlighted, active)
+            renderer.renderButton(Rect(0.px, 0.px, width.px, height.px), highlighted, active)
         }
         graphics.dispose()
         return listOf(image.getRGB(width / 2, 4), image.getRGB(width / 2, height - 2), image.getRGB(0, 0))

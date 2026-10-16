@@ -24,12 +24,17 @@ import java.awt.Graphics2D
  * There is exactly one window, and pages are a stack inside it rather than a window each: the
  * framework's own `showScreen` becomes [WindowFrame.push] and a page ending becomes
  * [WindowFrame.pop], which puts the page below it back. The stack lives in [WindowFrame]; this
- * object is the framework-facing half of it.
+ * class is the framework-facing half of it.
  *
- * It is a singleton because the framework publishes exactly one backend per process.
+ * Everything that belongs to one window belongs to one instance - the surface the scale is derived
+ * from above all - so a process with two windows is two of these rather than one serving two. The
+ * entries and the standalone [main] each build the single one their process has. Only the renderer
+ * is per-instance so far; the frame, the input and the utilities still live in one place and move
+ * the same way next.
  */
-object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
-    DslBackendRenderer<WindowRenderParam> by WindowRenderer,
+class WindowBackend internal constructor(private val renderer: WindowRenderer = WindowRenderer()) :
+    DslBackend<WindowRenderParam, WindowScreen>,
+    DslBackendRenderer<WindowRenderParam> by renderer,
     DslBackendMetadata by WindowMetadata,
     DslBackendUtils by WindowUtils,
     DslBackendInput by WindowInput
@@ -43,7 +48,7 @@ object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
      * pushes a page of its own for every entry that is clicked.
      */
     internal fun open() {
-        WindowFrame.open(create(ROOT_TITLE) { DslEntryPage() }.screen)
+        WindowFrame.open(create(ROOT_TITLE) { DslEntryPage() }.screen, this)
     }
 
     override fun create(title: String, dslFunction: DslFunction): DslBackendScreenHolder<WindowScreen> =
@@ -74,8 +79,8 @@ object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
         val param = WindowRenderParam(graphics)
         // Pages lay out in the surface's pixels and their contents are scaled inside that by the
         // scale the renderer derives from this same size, so the root rect is simply the surface.
-        WindowRenderer.surfaceWidth = width
-        WindowRenderer.surfaceHeight = height
+        renderer.surfaceWidth = width
+        renderer.surfaceHeight = height
         TopComponent.rect.apply {
             left = 0.px
             top = 0.px
@@ -86,12 +91,10 @@ object WindowBackend : DslBackend<WindowRenderParam, WindowScreen>,
         context(param) { flush() }
     }
 
-    internal fun closeAll() {
-        WindowFrame.close()
+    private companion object {
+        const val ROOT_TITLE = "KotlinMCUI"
+
+        const val DEFAULT_WIDTH = 960
+        const val DEFAULT_HEIGHT = 540
     }
-
-    private const val ROOT_TITLE = "KotlinMCUI"
-
-    private const val DEFAULT_WIDTH = 960
-    private const val DEFAULT_HEIGHT = 540
 }

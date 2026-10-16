@@ -61,6 +61,9 @@ internal object WindowFrame {
     private var surface: WindowPanel? = null
     private var timer: Timer? = null
 
+    /** The backend that paints into this window, handed over by [open]. */
+    internal var backend: WindowBackend? = null
+
     /** Set while a page is moving through the stack, so a close action that reenters fails loudly. */
     private var updating = false
 
@@ -80,10 +83,11 @@ internal object WindowFrame {
      * The whole window belongs to this one call: a second one while it is up is a caller that has
      * not understood that this backend is a window and not a window manager.
      */
-    internal fun open(page: WindowScreen) {
+    internal fun open(page: WindowScreen, painter: WindowBackend) {
         onEdt {
             check(frame == null && pages.isEmpty()) { "the window is already open" }
             closed = false
+            backend = painter
             push(page)
         }
     }
@@ -312,7 +316,7 @@ internal object WindowFrame {
                 copy.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
                 // `width` and `height` are the panel's own, so a resize is a new frame size: the
                 // framework lays the page out into it on this very frame.
-                WindowBackend.paint(copy, width, height)
+                WindowFrame.backend?.paint(copy, width, height)
             } catch (e: Throwable) {
                 // Swallowing it keeps the window alive for the next frame - a page that throws once
                 // may well paint the frame after - while `TopComponent.renderFailure`, which the

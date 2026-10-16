@@ -30,12 +30,13 @@ fun main(args: Array<String>) {
     val preview = System.getProperty(PREVIEW_PROPERTY)?.takeIf { it.isNotBlank() }
 
     DslRuntime.install { WindowMetadata }
+    val backend = WindowBackend()
     // The result is deliberately not checked. This process has exactly one backend, and the `install`
     // above would have thrown had another one installed the framework first, so this call cannot be
     // refused. Testing it here would read as if a game's own client backend could take the window
     // away from the standalone run, which cannot happen.
-    DslRuntime.platformReady { WindowBackend }
-    WindowBackend.open()
+    DslRuntime.platformReady { backend }
+    backend.open()
     dslLogger.info("standalone: window shown with the entry list at the bottom of its stack")
 
     // A preview session photographs and quits on its own; this path is for a plain standalone run.

@@ -66,7 +66,7 @@ internal object WindowUtils : DslBackendUtils {
     override suspend fun capture(fileName: String): File? = withContext(mainDispatcher) { captureNow(fileName) }
 
     override fun quit(exitCode: Int) {
-        WindowBackend.closeAll()
+        WindowFrame.close()
         // Nothing here can ask a hosting game to stop - this backend deliberately holds no loader
         // reference - so the process is ended directly. `quit` is only ever reached from a preview
         // session, whose whole purpose is to run unattended and exit.

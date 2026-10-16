@@ -23,10 +23,11 @@ import net.fabricmc.api.ClientModInitializer
  */
 class WindowFabricEntry : ClientModInitializer {
     override fun onInitializeClient() {
-        if (!DslRuntime.platformReady { WindowBackend }) {
+        val backend = WindowBackend()
+        if (!DslRuntime.platformReady { backend }) {
             dslLogger.warn("window: another backend was published first; this window stays down")
             return
         }
-        WindowBackend.open()
+        backend.open()
     }
 }

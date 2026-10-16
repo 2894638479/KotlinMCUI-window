@@ -35,10 +35,11 @@ class WindowNeoForgeEntry(modBus: IEventBus) {
     private fun clientSetup() {
         // The window goes up here rather than from the constructor: by this point the headless
         // backend has installed the framework, so the entry list it opens with has entries to list.
-        if (!DslRuntime.platformReady { WindowBackend }) {
+        val backend = WindowBackend()
+        if (!DslRuntime.platformReady { backend }) {
             dslLogger.warn("window: another backend was published first; this window stays down")
             return
         }
-        WindowBackend.open()
+        backend.open()
     }
 }

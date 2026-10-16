@@ -17,6 +17,8 @@ class WindowRendererGradientTest {
 
     private val size = 64
 
+    private val renderer = WindowRenderer()
+
     private fun surface(): Pair<BufferedImage, Graphics2D> {
         val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
         return image to image.createGraphics()
@@ -37,7 +39,7 @@ class WindowRendererGradientTest {
         val hue = Color(255,122,0)
         val black = Color(0,0,0)
         context(WindowRenderParam(graphics)) {
-            WindowRenderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black,null,null)
+            renderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black,null,null)
         }
         graphics.dispose()
 
@@ -69,7 +71,7 @@ class WindowRendererGradientTest {
             Color(0,0,255).rgbaInt,
         )
         context(WindowRenderParam(graphics)) {
-            WindowRenderer.renderTriangles(vertices,colors,null)
+            renderer.renderTriangles(vertices,colors,null)
         }
         graphics.dispose()
 
@@ -91,7 +93,7 @@ class WindowRendererGradientTest {
         val hue = Color(255,122,0)
         val black = Color(0,0,0)
         context(WindowRenderParam(graphics)) {
-            WindowRenderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black,null,null)
+            renderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black,null,null)
         }
         graphics.dispose()
 
