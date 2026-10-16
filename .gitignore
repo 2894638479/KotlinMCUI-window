@@ -45,3 +45,7 @@ replay_*.log
 runs/
 # the standalone run's screenshots
 screenshots/
+
+# temporary working documents
+docs/temp/
+
