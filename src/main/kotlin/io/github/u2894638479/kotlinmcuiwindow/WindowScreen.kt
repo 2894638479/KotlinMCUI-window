@@ -30,6 +30,7 @@ import io.github.u2894638479.kotlinmcui.dsl.DslFunction
  */
 class WindowScreen internal constructor(
     private val backend: WindowBackend,
+    private val frame: WindowFrame,
     val title: String,
     /** The size the window takes when this page is what opens it; pages after the first reuse it. */
     val width: Int,
@@ -43,7 +44,7 @@ class WindowScreen internal constructor(
      * The page's own close action is [WindowFrame.pop]: closing the screen is leaving the stack,
      * which is what the game backend's action does when it hands the platform the screen below.
      */
-    val dataStore = DslDataStore(backend, title, { WindowFrame.pop() }, dslFunction)
+    val dataStore = DslDataStore(backend, title, { frame.pop() }, dslFunction)
     val dslScreen = dataStore.dslScreen
 
     /**

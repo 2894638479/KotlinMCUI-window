@@ -24,7 +24,7 @@ import javax.swing.Timer
 import javax.swing.WindowConstants
 
 /**
- * The one Swing window this backend has, and the page stack inside it.
+ * The Swing window one backend instance has, and the page stack inside it.
  *
  * A page is not a window: [pages] is the whole of what is on screen, the last element is the page
  * being rendered, and only that one is in [TopComponent.children]. [push] makes a new page the top
@@ -35,7 +35,7 @@ import javax.swing.WindowConstants
  * The window is opened once and stays: see [minimize] for why nothing the user can do takes it
  * down. [close] exists for the harness that owns the process, not for the page stack.
  *
- * The window is built on the first [push] rather than when this object is first touched, because
+ * The window is built on the first [push] rather than when this instance is first touched, because
  * the framework asks its backend for a screen whenever it wants one - the overlay layer does this
  * on the first frame - and a created page must not put a window on the desktop. [open] is the same
  * push with the root page, and exists so the entry points have one call to make.
@@ -51,18 +51,17 @@ import javax.swing.WindowConstants
  */
 internal fun endsPage(stackSize: Int) = stackSize > 1
 
-internal object WindowFrame {
-    /** ~60 frames per second, the same cadence the game's own screen loop runs at. */
-    private const val FRAME_MILLIS = 16
+internal class WindowFrame(private val painter: WindowBackend) {
+    private companion object {
+        /** ~60 frames per second, the same cadence the game's own screen loop runs at. */
+        const val FRAME_MILLIS = 16
+    }
 
     private val pages = ArrayDeque<WindowScreen>()
 
     private var frame: JFrame? = null
     private var surface: WindowPanel? = null
     private var timer: Timer? = null
-
-    /** The backend that paints into this window, handed over by [open]. */
-    internal var backend: WindowBackend? = null
 
     /** Set while a page is moving through the stack, so a close action that reenters fails loudly. */
     private var updating = false
@@ -83,11 +82,10 @@ internal object WindowFrame {
      * The whole window belongs to this one call: a second one while it is up is a caller that has
      * not understood that this backend is a window and not a window manager.
      */
-    internal fun open(page: WindowScreen, painter: WindowBackend) {
+    internal fun open(page: WindowScreen) {
         onEdt {
             check(frame == null && pages.isEmpty()) { "the window is already open" }
             closed = false
-            backend = painter
             push(page)
         }
     }
@@ -256,7 +254,7 @@ internal object WindowFrame {
     }
 
     /** The window's own surface: it turns AWT events into framework events and paints the tree. */
-    private class WindowPanel : JPanel() {
+    private inner class WindowPanel : JPanel() {
         private var failureLogged = false
 
         init {
@@ -286,7 +284,7 @@ internal object WindowFrame {
                     // Escape leaves the page, but only a page that did not want it: a page that
                     // consumed the key - to close a dialog of its own, say - has already said what
                     // Escape means here, and the stack must not overrule that.
-                    if (!consumed && event.keyCode == KeyEvent.VK_ESCAPE) WindowFrame.pop()
+                    if (!consumed && event.keyCode == KeyEvent.VK_ESCAPE) this@WindowFrame.pop()
                 }
 
                 override fun keyReleased(event: KeyEvent) {
@@ -308,7 +306,7 @@ internal object WindowFrame {
             super.paintComponent(g)
             // A page can be released while a repaint it queued is still on its way here, and there
             // is nothing left to paint in that case.
-            if (WindowFrame.top() == null) return
+            if (top() == null) return
             val copy = g.create() as Graphics2D
             try {
                 copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
@@ -316,7 +314,7 @@ internal object WindowFrame {
                 copy.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
                 // `width` and `height` are the panel's own, so a resize is a new frame size: the
                 // framework lays the page out into it on this very frame.
-                WindowFrame.backend?.paint(copy, width, height)
+                painter.paint(copy, width, height)
             } catch (e: Throwable) {
                 // Swallowing it keeps the window alive for the next frame - a page that throws once
                 // may well paint the frame after - while `TopComponent.renderFailure`, which the

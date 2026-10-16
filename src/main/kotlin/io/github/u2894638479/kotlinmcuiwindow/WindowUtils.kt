@@ -26,6 +26,15 @@ import kotlin.system.exitProcess
  * files, which travel in the core library's jar and are therefore on this classpath already.
  */
 internal object WindowUtils : DslBackendUtils {
+    /**
+     * The window this object photographs and closes.
+     *
+     * Set by the backend that owns the window, because the utilities are still one object without a
+     * window of their own. When they become one per root this field is the constructor parameter it
+     * looks like, and it disappears.
+     */
+    var frame: WindowFrame? = null
+
     override var clipboard: String
         get() = runCatching {
             Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
@@ -66,7 +75,7 @@ internal object WindowUtils : DslBackendUtils {
     override suspend fun capture(fileName: String): File? = withContext(mainDispatcher) { captureNow(fileName) }
 
     override fun quit(exitCode: Int) {
-        WindowFrame.close()
+        frame?.close()
         // Nothing here can ask a hosting game to stop - this backend deliberately holds no loader
         // reference - so the process is ended directly. `quit` is only ever reached from a preview
         // session, whose whole purpose is to run unattended and exit.
@@ -102,8 +111,9 @@ internal object WindowUtils : DslBackendUtils {
      * tree, so photographing the surface photographs the page the user is on.
      */
     private fun captureNow(fileName: String): File? {
-        if (WindowFrame.top() == null) return null
-        val surface = WindowFrame.surface() ?: return null
+        val frame = frame ?: return null
+        if (frame.top() == null) return null
+        val surface = frame.surface() ?: return null
         val image = BufferedImage(maxOf(surface.width, 1), maxOf(surface.height, 1), BufferedImage.TYPE_INT_ARGB)
         val graphics = image.createGraphics()
         return try {

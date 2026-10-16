@@ -39,6 +39,16 @@ class WindowBackend internal constructor(private val renderer: WindowRenderer = 
     DslBackendUtils by WindowUtils,
     DslBackendInput by WindowInput
 {
+    /** The window this backend paints into, and the page stack inside it. */
+    private val frame = WindowFrame(this)
+
+    init {
+        // Temporary bridge: the utilities are still one object, so they photograph and close "the"
+        // window. This becomes their constructor parameter when they become one per root, and then
+        // this line goes away.
+        WindowUtils.frame = frame
+    }
+
     /**
      * Open the window with the framework's entry list as the page at the bottom of the stack.
      *
@@ -48,7 +58,7 @@ class WindowBackend internal constructor(private val renderer: WindowRenderer = 
      * pushes a page of its own for every entry that is clicked.
      */
     internal fun open() {
-        WindowFrame.open(create(ROOT_TITLE) { DslEntryPage() }.screen, this)
+        frame.open(create(ROOT_TITLE) { DslEntryPage() }.screen)
     }
 
     override fun create(title: String, dslFunction: DslFunction): DslBackendScreenHolder<WindowScreen> =
@@ -61,10 +71,10 @@ class WindowBackend internal constructor(private val renderer: WindowRenderer = 
         width: Int,
         height: Int,
     ): DslBackendScreenHolder<WindowScreen> = object : DslBackendScreenHolder<WindowScreen> {
-        override val screen = WindowScreen(this@WindowBackend, title, width, height, dslFunction)
+        override val screen = WindowScreen(this@WindowBackend, frame, title, width, height, dslFunction)
         // Showing a page is entering it: the page becomes the top of the window's stack, and the
         // page below it stays where it is, unmounted. This is the whole of "show a screen" here.
-        override fun show() = WindowFrame.push(screen)
+        override fun show() = frame.push(screen)
         override val dslScreen get() = screen.dslScreen
     }
 
