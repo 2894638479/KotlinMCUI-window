@@ -14,7 +14,9 @@ authors = "${mod_authors}"
 description = '''
 ${mod_description}
 '''
-iconFile = "${icon}"
+# The key kept the Forge spelling: NeoForge's own parser reads `logoFile`, and has no `iconFile` at
+# all, so both metadata files name the icon the same way.
+logoFile = "${icon}"
 
 # Same two requirements as the Forge file; NeoForge replaced `mandatory` with `type` in 1.20.5.
 [[dependencies.${mod_id}]]
