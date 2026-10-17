@@ -61,14 +61,25 @@ val serializationJson = "org.jetbrains.kotlinx:kotlinx-serialization-json:$seria
 val coroutines = "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutines_version"
 
 /**
- * The core library: the sibling checkout's own jar when it has been built, the published one
- * otherwise. There is no compile dependency on the headless backend - the two only meet at runtime,
- * where the loaders' metadata declares the pairing.
+ * The core library: the sibling checkout's own jars, or the published artifact for a clean checkout.
+ *
+ * A sibling checkout is a decision, not a hint: when `../kotlinmcui` exists the build must never fall
+ * back to the published artifact, because a missing local jar used to switch the whole build
+ * silently - and the cached published one can be months old, so the build is green while compiling
+ * against a different core library. A missing artifact is therefore a build error that names the
+ * task to run. There is no compile dependency on the headless backend - the two only meet at
+ * runtime, where the loaders' metadata declares the pairing.
  */
-val coreLibrary: Any = file("../kotlinmcui/build/libs/kotlinmcui-$kotlinmcui_version.jar")
-    .takeIf { it.exists() }
-    ?.let { files(it.path) }
-    ?: "com.github.2894638479:KotlinMCUI:v$kotlinmcui_version"
+val siblingCore = rootProject.file("../kotlinmcui")
+val coreLibrary: Any = if (siblingCore.isDirectory) {
+    val jarFile = siblingCore.resolve("build/libs/kotlinmcui-$kotlinmcui_version.jar")
+    val sourceFile = siblingCore.resolve("build/libs/kotlinmcui-$kotlinmcui_version-sources.jar")
+    check(jarFile.exists()) { "the local core jar is missing: run ./gradlew jar in $siblingCore" }
+    check(sourceFile.exists()) { "the local core sources jar is missing: run ./gradlew sourcesJar in $siblingCore" }
+    files(jarFile, sourceFile)
+} else {
+    "com.github.2894638479:KotlinMCUI:v$kotlinmcui_version"
+}
 
 /**
  * What the standalone `main()` needs on its classpath and a loader supplies in a game. Kept out of
