@@ -39,9 +39,8 @@ fun main(args: Array<String>) {
     // refused. Testing it here would read as if a game's own client platform could take the window
     // away from the standalone run, which cannot happen.
     DslRuntime.platformReady { platform }
-    val ownsMainRoot = DslRuntime.registeredProviders.isEmpty()
     DslRuntime.registerProvider(provider)
-    provider.open(if (ownsMainRoot) DslRuntime.ownerRoot else DslRuntime.createRoot(provider, ViewerLifetime.PROCESS))
+    provider.open(DslRuntime.rootFor(provider, ViewerLifetime.PROCESS))
     dslLogger.info("standalone: window shown with the entry list at the bottom of its stack")
 
     // A preview session photographs and quits on its own; this path is for a plain standalone run.

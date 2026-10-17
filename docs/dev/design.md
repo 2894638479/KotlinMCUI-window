@@ -17,13 +17,13 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 启动顺序上有三条真约束，但**它们不是一条链**：
 
 - `install` 必须在最前（重复调用会抛）。
-- **第一次读 `DslRuntime.ownerRoot` 之前必须已经 `registerProvider`**：主根由运行时用**第一个已注册的 provider** 懒创建，没注册就读会报错。
+- **选根（`DslRuntime.rootFor`）必须在 `registerProvider` 之后调**：它按"列表首位是不是这个 provider"决定给进程主根还是新根，注册前调会拿到新根。
 - `platformReady` 必须早于任何对平台的读（`dslPlatform`、`platform.utils` 等）。
 
 `registerProvider` 与 `platformReady` 的**先后是自由的**（反过来做同样成立），不要把其中一种顺序当成规则——写反了不是 bug。
 
-**没能成为进程平台 ≠ 本后端不可用。** 平台槽归进程（第一个发布者），渲染归根：`platformReady` 返回 false 时仍然 `registerProvider` 并建自己的根——provider 是第一个注册者时用 `DslRuntime.ownerRoot`，否则用 `DslRuntime.createRoot`；页面用**自己的 `WindowPlatform` 对象**构建，而 `dslPlatform` 仍是别的后端的。这样它能在 MC/web 已发布平台的进程里继续出窗口。
-输入转发同理：**每个事件都要送到本窗口渲染的那个根**，不能读 `ownerRoot`——共存进程里那会把光标与键盘派给别人的树，而且完全静默（一个对不上焦点的根本来就看起来像处理过了）。生产代码里 `DslRuntime.ownerRoot` 只应出现在选根的那一行，其余一切都接参数。
+**没能成为进程平台 ≠ 本后端不可用。** 平台槽归进程（第一个发布者），渲染归根：`platformReady` 返回 false 时仍然 `registerProvider` 并建自己的根——选根用 `DslRuntime.rootFor(provider, ViewerLifetime.PROCESS)`；页面用**自己的 `WindowPlatform` 对象**构建，而 `dslPlatform` 仍是别的后端的。这样它能在 MC/web 已发布平台的进程里继续出窗口。
+输入转发同理：**每个事件都要送到本窗口渲染的那个根**，不能读 `ownerRoot`——共存进程里那会把光标与键盘派给别人的树，而且完全静默（一个对不上焦点的根本来就看起来像处理过了）。`ownerRoot` 已 `internal`，后端连引用都做不到——选根只经 `rootFor`，其余一切都接参数。
 
 配对是**单向**的：这一份的元数据声明依赖无界面后端，反向则不是——无界面后端只在运行期用加载器的 mod 列表判断，不在元数据里引用这一份。这样无界面后端单独装也是完整可用的。
 

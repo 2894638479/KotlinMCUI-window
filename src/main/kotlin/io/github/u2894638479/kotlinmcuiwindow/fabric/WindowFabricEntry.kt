@@ -35,10 +35,7 @@ class WindowFabricEntry : ClientModInitializer {
         if (!DslRuntime.platformReady { platform }) {
             dslLogger.warn("window: another platform owns this process; this window renders its own root")
         }
-        // The owner root is built from the first registered provider, so it is this one's only when
-        // nothing registered before it; otherwise this window gets a root of its own.
-        val ownsMainRoot = DslRuntime.registeredProviders.isEmpty()
         DslRuntime.registerProvider(provider)
-        provider.open(if (ownsMainRoot) DslRuntime.ownerRoot else DslRuntime.createRoot(provider, ViewerLifetime.PROCESS))
+        provider.open(DslRuntime.rootFor(provider, ViewerLifetime.PROCESS))
     }
 }

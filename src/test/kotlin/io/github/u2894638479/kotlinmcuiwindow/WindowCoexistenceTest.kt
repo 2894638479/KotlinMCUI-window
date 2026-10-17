@@ -57,12 +57,12 @@ class WindowCoexistenceTest {
 
         // Losing the slot must not stop the window: the provider still registers, and a root still
         // exists. Which root depends on who registered first, exactly as the entries compute it.
-        val ownsMainRoot = DslRuntime.registeredProviders.isEmpty()
         DslRuntime.registerProvider(provider)
         assertTrue(DslRuntime.registeredProviders.any { it === provider }, "the provider must be registered")
 
-        val root = if (ownsMainRoot) DslRuntime.ownerRoot
-        else DslRuntime.createRoot(provider, ViewerLifetime.PROCESS)
+        // The same call the entries make, so the case exercises the production choice rather than a
+        // parallel one: the first registrant gets the owner root, everyone else a root of their own.
+        val root = DslRuntime.rootFor(provider, ViewerLifetime.PROCESS)
 
         val surface = BufferedImage(SURFACE_WIDTH, SURFACE_HEIGHT, BufferedImage.TYPE_INT_ARGB)
         val graphics = surface.createGraphics()
