@@ -225,6 +225,33 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
         }
     }
 
+    /**
+     * One frame of the root this window renders, or `false` when nothing was painted.
+     *
+     * Nothing is painted when there is no root yet, and when the root has been closed. A frame can
+     * still be queued while the window is going away, and that is an expected state rather than an
+     * unexpected use: painting it would be wrong, but letting it reach the root's teardown gate
+     * would surface as a "page threw while rendering" line, which would be a false alarm.
+     */
+    internal fun paintFrame(graphics: Graphics2D, width: Int, height: Int): Boolean {
+        val root = root ?: return false
+        if (root.isClosed) return false
+        // The surface size goes to both the root's viewport and the renderer's scale, then the tree
+        // is rendered and committed.
+        renderer.surfaceWidth = width
+        renderer.surfaceHeight = height
+        root.rect.apply {
+            left = 0.px
+            top = 0.px
+            right = width.px
+            bottom = height.px
+        }
+        val param = WindowRenderParam(graphics, width, height)
+        context(renderer, param, input.mouse) { root.component.render() }
+        context(param) { renderer.flush() }
+        return true
+    }
+
     /** Give up the desktop resources. Pages must already be gone; a later [push] builds a new window. */
     private fun dispose() {
         timer?.stop()
@@ -355,23 +382,8 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
                 copy.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
                 // `width` and `height` are the panel's own, so a resize is a new frame size: the
                 // framework lays the page out into it on this very frame.
-                val root = root ?: return
-                // A frame can still be queued when the window is being closed; the root is closed by
-                // then, and painting it would be wrong even though nothing would throw here.
-                if (root.isClosed) return
-                // One frame of this root: the surface size goes to both the root's viewport and the
-                // renderer's scale, then the tree is rendered and committed.
-                renderer.surfaceWidth = width
-                renderer.surfaceHeight = height
-                root.rect.apply {
-                    left = 0.px
-                    top = 0.px
-                    right = width.px
-                    bottom = height.px
-                }
-                val param = WindowRenderParam(copy, width, height)
-                context(renderer, param, input.mouse) { root.component.render() }
-                context(param) { renderer.flush() }
+                // The frame loop lives on the frame itself so it can be driven without a window.
+                paintFrame(copy, width, height)
             } catch (e: Throwable) {
                 // Swallowing it keeps the window alive for the next frame - a page that throws once
                 // may well paint the frame after - while `renderFailure`, which the

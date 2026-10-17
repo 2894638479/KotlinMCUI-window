@@ -19,6 +19,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /**
  * Coexistence: another backend published the platform first, so this backend's own publish is
@@ -115,6 +116,50 @@ class WindowCoexistenceTest {
         // on my root", not merely "something was called".
         assertSame(built.root, holder.dslScreen.dataStore.root)
         assertSame(ForeignPlatform, dslPlatform)
+    }
+
+    /**
+     * The closed-root guard in the frame loop, which would otherwise be a claim in a comment only.
+     *
+     * Removing the guard makes this fail twice over: the loop would paint into the closed root's
+     * surface, and the root's teardown gate would throw instead, which the window's panel turns into
+     * a "page threw while rendering" line - a false alarm, since the window is simply closing.
+     */
+    @Test
+    fun `a closed root is not painted by the frame loop`() {
+        publishForeignPlatform()
+        val built = buildWindow()
+
+        val first = BufferedImage(SURFACE_WIDTH, SURFACE_HEIGHT, BufferedImage.TYPE_INT_ARGB)
+        val open = first.createGraphics()
+        try {
+            assertTrue(
+                built.window.paintFrame(open, SURFACE_WIDTH, SURFACE_HEIGHT),
+                "an open root must paint its frame",
+            )
+        } finally {
+            open.dispose()
+        }
+
+        built.root.close()
+        assertTrue(built.root.isClosed)
+
+        val second = BufferedImage(SURFACE_WIDTH, SURFACE_HEIGHT, BufferedImage.TYPE_INT_ARGB)
+        val closed = second.createGraphics()
+        try {
+            assertFalse(
+                built.window.paintFrame(closed, SURFACE_WIDTH, SURFACE_HEIGHT),
+                "a closed root must not paint",
+            )
+        } finally {
+            closed.dispose()
+        }
+        // Nothing reached the surface: every sampled pixel is still fully transparent.
+        for (x in 0 until SURFACE_WIDTH step 16) {
+            for (y in 0 until SURFACE_HEIGHT step 16) {
+                assertEquals(0, second.getRGB(x, y) ushr 24, "a closed frame drew at ($x,$y)")
+            }
+        }
     }
 
     private companion object {
