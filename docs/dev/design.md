@@ -12,7 +12,9 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 ## 与无界面后端的分工
 
-无界面后端（`kotlinmcuibackend`）负责 `install`（元数据与入口发现），这一份负责 `platformReady`（发布会渲染的后端）。无界面后端发现 `kotlinmcuiwindow` 已安装时保持沉默。
+无界面后端（`kotlinmcuibackend`）负责 `install`（元数据与入口发现）；这一份发布 `DslPlatform`（元数据、进程级工具、进程级 dispatcher）并向运行时**注册**自己的 `DslRootProvider`——绘制、输入、页面工厂与每帧的 `frame(root, renderParam)` 都在 provider 上。无界面后端发现 `kotlinmcuiwindow` 已安装时保持沉默。
+
+顺序是 `install` → `platformReady` → `registerProvider` → 读主根：`platformReady` 要求元数据已 `install`；主根由运行时用**第一个已注册的 provider** 懒创建，所以 provider 必须先注册，第一次读 `DslRuntime.ownerRoot` 才会成功。
 
 配对是**单向**的：这一份的元数据声明依赖无界面后端，反向则不是——无界面后端只在运行期用加载器的 mod 列表判断，不在元数据里引用这一份。这样无界面后端单独装也是完整可用的。
 
@@ -48,3 +50,13 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 - 不引用任何 Minecraft 类。因此 `renderButton` / `renderSlot` / `renderContainer` / `renderTooltip` 是这一份后端的平面近似，用自有调色板，而不是读原版贴图。
 - 不定位输入法候选窗口：Swing 没有这个 API，候选窗由输入法自己放置。
 - 不做无障碍朗读（没有到读屏软件的桥），不播放按钮音效（唯一能发的是系统蜂鸣，比静音更糟）。
+
+## 迁移到 provider 角色：常见坑
+
+`DslRootProvider` **不需要**实现 `DslBackendRenderer`，也**不要**让 provider `by renderer` 去冒充渲染器——那会把平台角色与渲染角色混在一个对象上。provider 只是**持有**渲染器，并在 `frame()` 里把渲染器当作 context 实参传进去：
+
+```kotlin
+context(renderer, renderParam, input.mouse) { root.component.render() }
+```
+
+`frame()` 还要**先把根矩形写成输出尺寸、再渲染**：渲染 pass 会把那个矩形拷到每个已挂载的屏。顺序反了，屏会按上一帧的尺寸布局。
