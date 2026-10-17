@@ -6,7 +6,7 @@ import io.github.u2894638479.kotlinmcui.backend.DslBackendScreenHolder
 import io.github.u2894638479.kotlinmcui.backend.DslRootProvider
 import io.github.u2894638479.kotlinmcui.backend.DslRootScreenFactory
 import io.github.u2894638479.kotlinmcui.backend.DslRootUtils
-import io.github.u2894638479.kotlinmcui.backend.DslRuntime
+import io.github.u2894638479.kotlinmcui.container.ViewerLifetime
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
 import io.github.u2894638479.kotlinmcui.entry.DslEntryPage
@@ -61,14 +61,13 @@ internal class WindowRootProvider(
     override val rootUtils: DslRootUtils get() = utils
 
     /**
-     * Open the window with the framework's entry list as the page at the bottom of the stack.
+     * Open the window rendering [root], with the framework's entry list as the bottom of the stack.
      *
-     * Called once by the loader entry points, after [DslRuntime.platformReady] has published this
-     * platform and [DslRuntime.registerProvider] has handed over this provider - the owner root is
-     * built from the first registered provider, so reading it here is what creates it.
+     * The caller decides which root this is, because the two cases differ: when this provider was the
+     * first one registered, that is the process owner root; when another backend got there first, this
+     * window renders a root of its own instead. The window is still the same window either way.
      */
-    internal fun open() {
-        val root = DslRuntime.ownerRoot
+    internal fun open(root: DslRoot) {
         window.open(root, factory.create(ROOT_TITLE) { DslEntryPage() }.screen)
     }
 

@@ -1,6 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow.neoforge
 
 import io.github.u2894638479.kotlinmcui.backend.DslRuntime
+import io.github.u2894638479.kotlinmcui.container.ViewerLifetime
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import io.github.u2894638479.kotlinmcuiwindow.WindowPlatform
 import io.github.u2894638479.kotlinmcuiwindow.WindowRootProvider
@@ -40,11 +41,16 @@ class WindowNeoForgeEntry(modBus: IEventBus) {
         val utils = WindowUtils()
         val platform = WindowPlatform(utils)
         val provider = WindowRootProvider(platform, utils)
+        // Losing the platform slot is not the same as being unusable: the slot belongs to the
+        // process, and this window still renders a root of its own in a process another backend
+        // platform owns.
         if (!DslRuntime.platformReady { platform }) {
-            dslLogger.warn("window: another platform was published first; this window stays down")
-            return
+            dslLogger.warn("window: another platform owns this process; this window renders its own root")
         }
+        // The owner root is built from the first registered provider, so it is this one's only when
+        // nothing registered before it; otherwise this window gets a root of its own.
+        val ownsMainRoot = DslRuntime.registeredProviders.isEmpty()
         DslRuntime.registerProvider(provider)
-        provider.open()
+        provider.open(if (ownsMainRoot) DslRuntime.ownerRoot else DslRuntime.createRoot(provider, ViewerLifetime.PROCESS))
     }
 }

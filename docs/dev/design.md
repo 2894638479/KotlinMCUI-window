@@ -22,6 +22,8 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 `registerProvider` 与 `platformReady` 的**先后是自由的**（反过来做同样成立），不要把其中一种顺序当成规则——写反了不是 bug。
 
+**没能成为进程平台 ≠ 本后端不可用。** 平台槽归进程（第一个发布者），渲染归根：`platformReady` 返回 false 时仍然 `registerProvider` 并建自己的根——provider 是第一个注册者时用 `DslRuntime.ownerRoot`，否则用 `DslRuntime.createRoot`；页面用**自己的 `WindowPlatform` 对象**构建，而 `dslPlatform` 仍是别的后端的。这样它能在 MC/web 已发布平台的进程里继续出窗口。
+
 配对是**单向**的：这一份的元数据声明依赖无界面后端，反向则不是——无界面后端只在运行期用加载器的 mod 列表判断，不在元数据里引用这一份。这样无界面后端单独装也是完整可用的。
 
 发布时机不能在构造期：`platformReady` 内部要求元数据已 `install`，所以 Fabric 用 `ClientModInitializer`（loader 保证它在 `ModInitializer` 之后），Forge/NeoForge 用各自的客户端 setup 事件。

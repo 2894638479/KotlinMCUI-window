@@ -116,14 +116,17 @@ dependencies {
     standalone(serializationJson)
     standalone(kotlin("reflect"))
 
-    // The tests only cover the parts of this backend that have no window in them - the language
-    // lookup and the projection arithmetic - and both of them read the core library: the first its
-    // language files, the second its `Transform`. A jar file dependency brings no transitive
-    // dependency with it, so what the core needs at runtime is named here as well.
+    // The core library is a jar file dependency, so it brings no transitive dependency with it, and
+    // most of what the framework needs at runtime is `compileOnly` for the main source set. Anything
+    // the tests actually execute is therefore named here as well.
     testImplementation(kotlin("test"))
     testImplementation(coreLibrary)
     testImplementation(slf4j)
     testImplementation(serializationJson)
+    // The coexistence cases build a real root, so they need the framework's runtime pieces that
+    // the main source set only compiles against: compileOnly names nothing for the test runtime.
+    testImplementation(coroutines)
+    testImplementation(fastutil)
 }
 
 kotlin {
