@@ -1,7 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.backend.DslBackendInput
-import io.github.u2894638479.kotlinmcui.container.TopComponent
+import io.github.u2894638479.kotlinmcui.backend.DslRuntime
 import io.github.u2894638479.kotlinmcui.input.Key
 import io.github.u2894638479.kotlinmcui.input.KeyModifiers
 import io.github.u2894638479.kotlinmcui.input.MouseButton
@@ -64,19 +64,19 @@ internal class WindowInput : DslBackendInput {
 
     fun mouseMoved(x: Int, y: Int) {
         mouse = Position(x.px, y.px)
-        guarded("a cursor move", Unit) { context(mouse) { TopComponent.mouseMove() } }
+        guarded("a cursor move", Unit) { context(mouse) { DslRuntime.ownerRoot.component.mouseMove() } }
     }
 
     fun mousePressed(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
         heldButtons.add(button.ordinal)
-        return guarded("a mouse press", false) { context(mouse, modifiersOf(event)) { TopComponent.mouseDown(button) } }
+        return guarded("a mouse press", false) { context(mouse, modifiersOf(event)) { DslRuntime.ownerRoot.component.mouseDown(button) } }
     }
 
     fun mouseReleased(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
         heldButtons.remove(button.ordinal)
-        return guarded("a mouse release", false) { context(mouse, modifiersOf(event)) { TopComponent.mouseUp(button) } }
+        return guarded("a mouse release", false) { context(mouse, modifiersOf(event)) { DslRuntime.ownerRoot.component.mouseUp(button) } }
     }
 
     fun mouseWheel(event: MouseWheelEvent) {
@@ -85,8 +85,8 @@ internal class WindowInput : DslBackendInput {
         val amount = -event.preciseWheelRotation
         guarded("a scroll", Unit) {
             context(mouse) {
-                if (event.isShiftDown) TopComponent.mouseScrollHorizontal(amount)
-                else TopComponent.mouseScrollVertical(amount)
+                if (event.isShiftDown) DslRuntime.ownerRoot.component.mouseScrollHorizontal(amount)
+                else DslRuntime.ownerRoot.component.mouseScrollVertical(amount)
             }
         }
     }
@@ -96,19 +96,19 @@ internal class WindowInput : DslBackendInput {
         heldKeys.add(key.code)
         // The framework reads a repeat as another press, which is what GLFW's GLFW_REPEAT path does,
         // so a repeated AWT event is passed straight through.
-        return guarded("a key press", false) { context(modifiersOf(event)) { TopComponent.keyDown(key, event.keyCode) } }
+        return guarded("a key press", false) { context(modifiersOf(event)) { DslRuntime.ownerRoot.component.keyDown(key, event.keyCode) } }
     }
 
     fun keyReleased(event: KeyEvent): Boolean {
         val key = keyOf(event)
         heldKeys.remove(key.code)
-        return guarded("a key release", false) { context(modifiersOf(event)) { TopComponent.keyUp(key, event.keyCode) } }
+        return guarded("a key release", false) { context(modifiersOf(event)) { DslRuntime.ownerRoot.component.keyUp(key, event.keyCode) } }
     }
 
     fun keyTyped(event: KeyEvent): Boolean {
         val typed = event.keyChar
         if (typed == KeyEvent.CHAR_UNDEFINED) return false
-        return guarded("a typed character", false) { context(modifiersOf(event)) { TopComponent.charTyped(typed) } }
+        return guarded("a typed character", false) { context(modifiersOf(event)) { DslRuntime.ownerRoot.component.charTyped(typed) } }
     }
 
     /** A window that loses focus never sees the key-up, so nothing may stay stuck down. */

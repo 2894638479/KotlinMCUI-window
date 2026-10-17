@@ -6,7 +6,7 @@ import io.github.u2894638479.kotlinmcui.backend.DslBackendMetadata
 import io.github.u2894638479.kotlinmcui.backend.DslBackendRenderer
 import io.github.u2894638479.kotlinmcui.backend.DslBackendScreenHolder
 import io.github.u2894638479.kotlinmcui.backend.DslBackendUtils
-import io.github.u2894638479.kotlinmcui.container.TopComponent
+import io.github.u2894638479.kotlinmcui.backend.DslRuntime
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
 import io.github.u2894638479.kotlinmcui.entry.DslEntryPage
 import io.github.u2894638479.kotlinmcui.math.px
@@ -16,7 +16,7 @@ import java.awt.Graphics2D
  * The window backend: one Swing window and a Java2D software renderer, with no Minecraft in it.
  *
  * It is assembled from the same four pieces any backend is - a renderer, metadata, utilities and
- * input - and adds only the frame loop that drives [TopComponent]. The type parameters are this
+ * input - and adds only the frame loop that drives the root. The type parameters are this
  * backend's own: [WindowRenderParam] is the `Graphics2D` of the frame being painted and
  * [WindowScreen] is one page of the window, so nothing here has to be parameterised over a game's
  * screen class.
@@ -94,13 +94,13 @@ class WindowBackend internal constructor(
         // scale the renderer derives from this same size, so the root rect is simply the surface.
         renderer.surfaceWidth = width
         renderer.surfaceHeight = height
-        TopComponent.rect.apply {
+        DslRuntime.ownerRoot.rect.apply {
             left = 0.px
             top = 0.px
             right = width.px
             bottom = height.px
         }
-        context(this, param, input.mouse) { TopComponent.render() }
+        context(this, param, input.mouse) { DslRuntime.ownerRoot.component.render() }
         context(param) { flush() }
     }
 

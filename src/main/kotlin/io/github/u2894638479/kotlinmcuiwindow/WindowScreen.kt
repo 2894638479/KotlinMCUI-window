@@ -1,8 +1,8 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
+import io.github.u2894638479.kotlinmcui.backend.DslRuntime
 import io.github.u2894638479.kotlinmcui.container.DslChild
 import io.github.u2894638479.kotlinmcui.container.DslDataStore
-import io.github.u2894638479.kotlinmcui.container.TopComponent
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
 
 /**
@@ -22,7 +22,7 @@ import io.github.u2894638479.kotlinmcui.dsl.DslFunction
  * Unmounting deliberately does not close it. Everything a page declared with `stable` lives in its
  * [DslDataStore] and is released by `DslScreen.close`, so a page that is merely hidden keeps what it
  * had - which is the same promise the game backend makes when a screen is left and entered again.
- * The counterpart is that a hidden page is invisible, not unbuilt: the shared [TopComponent.children]
+ * The counterpart is that a hidden page is invisible, not unbuilt: the root's children
  * list is what the frame renders, and leaving it is what stops the page from being drawn.
  *
  * Nothing here touches Minecraft: a page is an ordinary framework screen that happens to be rendered
@@ -57,14 +57,14 @@ class WindowScreen internal constructor(
     internal fun mount() {
         check(!released) { "page '$title' was released and cannot be shown again" }
         if (child != null) return
-        child = TopComponent.children.collect(dslScreen)
+        child = DslRuntime.ownerRoot.children.collect(dslScreen)
     }
 
     /** Take this page out of the rendered tree, leaving everything it declared in place. */
     internal fun unmount() {
         val mounted = child ?: return
         child = null
-        TopComponent.children.remove(mounted)
+        DslRuntime.ownerRoot.children.remove(mounted)
     }
 
     /**

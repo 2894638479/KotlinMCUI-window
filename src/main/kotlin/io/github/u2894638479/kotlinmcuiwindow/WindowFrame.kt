@@ -1,6 +1,5 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
-import io.github.u2894638479.kotlinmcui.container.TopComponent
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import java.awt.Dimension
@@ -27,7 +26,7 @@ import javax.swing.WindowConstants
  * The Swing window one backend instance has, and the page stack inside it.
  *
  * A page is not a window: [pages] is the whole of what is on screen, the last element is the page
- * being rendered, and only that one is in [TopComponent.children]. [push] makes a new page the top
+ * being rendered, and only that one is in the root's children. [push] makes a new page the top
  * - unmounting the page below it, which keeps everything that page declared - and [pop] ends the
  * top page and puts the one below it back, putting the window away when there is nothing below.
  * That is the stack the framework drives through `showScreen` and `DslScreen.close` alone.
@@ -317,7 +316,7 @@ internal class WindowFrame(private val painter: WindowBackend, private val input
                 painter.paint(copy, width, height)
             } catch (e: Throwable) {
                 // Swallowing it keeps the window alive for the next frame - a page that throws once
-                // may well paint the frame after - while `TopComponent.renderFailure`, which the
+                // may well paint the frame after - while `renderFailure`, which the
                 // framework sets before rethrowing, still tells a preview session the run failed.
                 if (!failureLogged) {
                     failureLogged = true
