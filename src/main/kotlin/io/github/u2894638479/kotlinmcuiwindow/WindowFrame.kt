@@ -217,6 +217,10 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
             } finally {
                 updating = false
             }
+            // The root is closed before the frame loop stops, so a frame that was already queued hits
+            // the closed gate instead of painting into a window that is going away. Closing is
+            // idempotent, and it deliberately does not stop this window's timer - that is [dispose].
+            root?.close()
             dispose()
         }
     }
@@ -352,6 +356,9 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
                 // `width` and `height` are the panel's own, so a resize is a new frame size: the
                 // framework lays the page out into it on this very frame.
                 val root = root ?: return
+                // A frame can still be queued when the window is being closed; the root is closed by
+                // then, and painting it would be wrong even though nothing would throw here.
+                if (root.isClosed) return
                 // One frame of this root: the surface size goes to both the root's viewport and the
                 // renderer's scale, then the tree is rendered and committed.
                 renderer.surfaceWidth = width

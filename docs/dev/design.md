@@ -66,7 +66,7 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 2. `context(renderer, renderParam, input.mouse) { root.component.render() }`——渲染器作为 context 实参传进去，不要让别的角色去"冒充"渲染器；
 3. `renderer.flush()`。
 
-顺序反了，屏会按上一帧的尺寸布局；第 2 步漏掉，窗口就是一片空白。预览也不再由运行时顺带启动：`DslPreview.start(root)` 要显式调。
+顺序反了，屏会按上一帧的尺寸布局；第 2 步漏掉，窗口就是一片空白。 收窗口时**先 `root.close()`、再停驱动**：关掉根之后，晚到的一帧会在门口被拒，而不是画进一个正在消失的窗口。预览也不再由运行时顺带启动：`DslPreview.start(root)` 要显式调。
 
 ## 构建：兄弟仓优先，且不静默回落
 
