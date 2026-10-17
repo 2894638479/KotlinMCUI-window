@@ -48,7 +48,7 @@ private const val GOURAUD_SIZE = 32
 
 internal class WindowRenderer : DslBackendRenderer<WindowRenderParam> {
     /**
-     * The surface the scale is derived from, set by [WindowRootProvider.frame] before every frame so it is
+     * The surface the scale is derived from, set by the window's frame loop before every frame so it is
      * always the window's current size. Zero until the first paint, which the formula floors to 1.0.
      */
     internal var surfaceWidth: Int = 0

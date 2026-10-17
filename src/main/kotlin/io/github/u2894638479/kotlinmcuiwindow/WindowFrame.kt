@@ -1,8 +1,10 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
+import io.github.u2894638479.kotlinmcui.backend.DslBackendScreenHolder
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
+import io.github.u2894638479.kotlinmcui.math.px
 import java.awt.Dimension
 import java.awt.Frame
 import java.awt.Graphics
@@ -51,10 +53,15 @@ import javax.swing.WindowConstants
  */
 internal fun endsPage(stackSize: Int) = stackSize > 1
 
-internal class WindowFrame(private val provider: WindowRootProvider, private val input: WindowInput) {
+internal class WindowFrame(private val renderer: WindowRenderer, private val input: WindowInput) {
     private companion object {
         /** ~60 frames per second, the same cadence the game's own screen loop runs at. */
         const val FRAME_MILLIS = 16
+
+        /** The surface size a window opens with; only the page that opens it gets to choose. */
+        const val DEFAULT_WIDTH = 960
+
+        const val DEFAULT_HEIGHT = 540
     }
 
     private val pages = ArrayDeque<WindowScreen>()
@@ -70,8 +77,35 @@ internal class WindowFrame(private val provider: WindowRootProvider, private val
     private var popping = false
     private var closed = false
 
-    /** The root this window renders, set by [open]. */
+    /** The root this window renders, given by [attach] before any page is created for it. */
     private var root: DslRoot? = null
+
+    /** Give this window the root it renders. Every page it creates belongs to that root. */
+    internal fun attach(root: DslRoot) {
+        this.root = root
+    }
+
+    /**
+     * Create a page for this window on [root].
+     *
+     * The holder is what the framework keeps: its `show` makes the page the top of this window's
+     * stack, which is the whole of "show a screen" here.
+     */
+    internal fun create(
+        platform: WindowPlatform,
+        title: String,
+        dslFunction: DslFunction,
+        width: Int = DEFAULT_WIDTH,
+        height: Int = DEFAULT_HEIGHT,
+    ): DslBackendScreenHolder<WindowScreen> {
+        val root = checkNotNull(root) { "a page was created before this window was given its root" }
+        val page = WindowScreen(platform, root, this, width, height, title, dslFunction)
+        return object : DslBackendScreenHolder<WindowScreen> {
+            override val screen = page
+            override fun show() = push(page)
+            override val dslScreen get() = page.dslScreen
+        }
+    }
 
     /** The page being rendered, or `null` while no window is up. */
     internal fun top(): WindowScreen? = pages.lastOrNull()
@@ -85,11 +119,10 @@ internal class WindowFrame(private val provider: WindowRootProvider, private val
      * The whole window belongs to this one call: a second one while it is up is a caller that has
      * not understood that this backend is a window and not a window manager.
      */
-    internal fun open(root: DslRoot, page: WindowScreen) {
+    internal fun open(page: WindowScreen) {
         onEdt {
             check(frame == null && pages.isEmpty()) { "the window is already open" }
             closed = false
-            this.root = root
             push(page)
         }
     }
@@ -105,7 +138,7 @@ internal class WindowFrame(private val provider: WindowRootProvider, private val
                 pages.addLast(page)
                 start(page)
                 frame?.title = page.title
-                page.mount(checkNotNull(root) { "the window was pushed before it was opened" })
+                page.mount()
                 focusSurface()
             } finally {
                 updating = false
@@ -141,7 +174,7 @@ internal class WindowFrame(private val provider: WindowRootProvider, private val
             page.release()
             val previous = pages.last()
             frame?.title = previous.title
-            previous.mount(checkNotNull(root) { "the window was pushed before it was opened" })
+            previous.mount()
             focusSurface()
         } finally {
             popping = false
@@ -319,7 +352,19 @@ internal class WindowFrame(private val provider: WindowRootProvider, private val
                 // `width` and `height` are the panel's own, so a resize is a new frame size: the
                 // framework lays the page out into it on this very frame.
                 val root = root ?: return
-                provider.frame(root, WindowRenderParam(copy, width, height))
+                // One frame of this root: the surface size goes to both the root's viewport and the
+                // renderer's scale, then the tree is rendered and committed.
+                renderer.surfaceWidth = width
+                renderer.surfaceHeight = height
+                root.rect.apply {
+                    left = 0.px
+                    top = 0.px
+                    right = width.px
+                    bottom = height.px
+                }
+                val param = WindowRenderParam(copy, width, height)
+                context(renderer, param, input.mouse) { root.component.render() }
+                context(param) { renderer.flush() }
             } catch (e: Throwable) {
                 // Swallowing it keeps the window alive for the next frame - a page that throws once
                 // may well paint the frame after - while `renderFailure`, which the

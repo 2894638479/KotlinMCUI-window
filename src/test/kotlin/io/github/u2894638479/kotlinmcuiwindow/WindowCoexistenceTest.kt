@@ -3,11 +3,13 @@ package io.github.u2894638479.kotlinmcuiwindow
 import io.github.u2894638479.kotlinmcui.backend.DslBackendMetadata
 import io.github.u2894638479.kotlinmcui.backend.DslPlatform
 import io.github.u2894638479.kotlinmcui.backend.DslPlatformUtils
+import io.github.u2894638479.kotlinmcui.backend.DslRootScreenFactory
 import io.github.u2894638479.kotlinmcui.backend.DslRuntime
 import io.github.u2894638479.kotlinmcui.backend.Environment
 import io.github.u2894638479.kotlinmcui.backend.dslPlatform
-import io.github.u2894638479.kotlinmcui.container.ViewerLifetime
+import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.image.ImageHolder
+import io.github.u2894638479.kotlinmcui.math.px
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import java.awt.image.BufferedImage
@@ -17,91 +19,101 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
-import kotlin.test.assertTrue
 
 /**
  * Coexistence: another backend published the platform first, so this backend's own publish is
- * refused. That is the multi-backend case the split exists for, and the rule it has to obey is
- * "platform belongs to the process, rendering belongs to the root":
+ * refused. The rule under test is "the platform belongs to the process, the root belongs to this
+ * backend": the process platform stays the other backend's, and this one still builds a root, still
+ * creates pages on that root, and still renders a frame.
  *
- *  - the platform slot stays with the first publisher, so `dslPlatform` is not this backend's;
- *  - this backend still registers its provider and still renders a root of its own, using its own
- *    [WindowPlatform] object for its screens;
- *  - a root that is not the process owner is created through `createRoot` and renders just as well.
- *
- * This is the only class that installs and publishes, and it does so through a stub platform, so it
- * must run in the same JVM without another case expecting the window's own platform to be published.
+ * This is the only class that installs and publishes, and it installs a stub platform, so it must
+ * run in a JVM where no other case expects the window's own platform to be published.
  */
 class WindowCoexistenceTest {
 
-    /** Publish the stub platform. Idempotent: the first call publishes, later ones are refused. */
+    /** The pieces one window is made of, built the way the bootstrap builds them. */
+    private class Built(
+        val platform: WindowPlatform,
+        val root: DslRoot,
+        val renderer: WindowRenderer,
+        val input: WindowInput,
+        val window: WindowFrame,
+    )
+
+    /**
+     * Publish the stub platform. Idempotent: the first call publishes, later ones are refused.
+     *
+     * `install` is single-shot and its "already installed" signal is internal, so a second call
+     * throwing is the expected outcome on every run after the first.
+     */
     private fun publishForeignPlatform() {
-        // `install` is single-shot and its "already installed" signal is internal, so a second call
-        // throwing is the expected outcome on every run after the first.
         runCatching { DslRuntime.install { ForeignPlatform.metadata } }
-        DslRuntime.platformReady { ForeignPlatform }
+        DslRuntime.start { ForeignPlatform }
         assertSame(ForeignPlatform, dslPlatform, "the process platform must still be the stub's")
+    }
+
+    /** Build one window the way the bootstrap does, and assert that its own publish was refused. */
+    private fun buildWindow(): Built {
+        val utils = WindowUtils()
+        val platform = WindowPlatform(utils)
+        assertFalse(DslRuntime.start { platform }, "another platform already owns the process")
+
+        val input = WindowInput()
+        val renderer = WindowRenderer()
+        val window = WindowFrame(renderer, input)
+        val screenFactory = DslRootScreenFactory<WindowScreen> { title, dslFunction ->
+            window.create(platform, title, dslFunction)
+        }
+        val root = DslRoot(input, renderer, screenFactory, utils)
+        window.attach(root)
+        input.root = root
+        return Built(platform, root, renderer, input, window)
+    }
+
+    /** Drive one frame the way the window's panel does: size, viewport, render, flush. */
+    private fun renderOneFrame(built: Built, width: Int, height: Int) {
+        val surface = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+        val graphics = surface.createGraphics()
+        try {
+            built.renderer.surfaceWidth = width
+            built.renderer.surfaceHeight = height
+            built.root.rect.apply {
+                left = 0.px
+                top = 0.px
+                right = width.px
+                bottom = height.px
+            }
+            val param = WindowRenderParam(graphics, width, height)
+            context(built.renderer, param, built.input.mouse) { built.root.component.render() }
+            context(param) { built.renderer.flush() }
+        } finally {
+            graphics.dispose()
+        }
     }
 
     @Test
     fun `another platform owning the process does not stop the window from rendering`() {
         publishForeignPlatform()
+        val built = buildWindow()
 
-        val utils = WindowUtils()
-        val platform = WindowPlatform(utils)
-        val provider = WindowRootProvider(platform, utils)
+        renderOneFrame(built, SURFACE_WIDTH, SURFACE_HEIGHT)
 
-        // The entry point's own publish is refused here - that is the situation under test.
-        assertFalse(DslRuntime.platformReady { platform })
-        assertSame(ForeignPlatform, dslPlatform, "a refused publish must not take the slot")
-
-        // Losing the slot must not stop the window: the provider still registers, and a root still
-        // exists. Which root depends on who registered first, exactly as the entries compute it.
-        DslRuntime.registerProvider(provider)
-        assertTrue(DslRuntime.registeredProviders.any { it === provider }, "the provider must be registered")
-
-        // The same call the entries make, so the case exercises the production choice rather than a
-        // parallel one: the first registrant gets the owner root, everyone else a root of their own.
-        val root = DslRuntime.rootFor(provider, ViewerLifetime.PROCESS)
-
-        val surface = BufferedImage(SURFACE_WIDTH, SURFACE_HEIGHT, BufferedImage.TYPE_INT_ARGB)
-        val graphics = surface.createGraphics()
-        try {
-            // One frame: the provider writes the root's rect from the surface size, renders the root
-            // and flushes. A refused platform must not make any of that throw.
-            provider.frame(root, WindowRenderParam(graphics, SURFACE_WIDTH, SURFACE_HEIGHT))
-        } finally {
-            graphics.dispose()
-        }
-
-        assertEquals(SURFACE_WIDTH.toDouble(), root.rect.right.raw, 0.0)
-        assertEquals(SURFACE_HEIGHT.toDouble(), root.rect.bottom.raw, 0.0)
-        assertSame(ForeignPlatform, dslPlatform, "rendering must not take the platform slot")
+        assertEquals(SURFACE_WIDTH.toDouble(), built.root.rect.right.raw, 0.0)
+        assertEquals(SURFACE_HEIGHT.toDouble(), built.root.rect.bottom.raw, 0.0)
+        // Rendering must not have moved the platform slot: it still belongs to the first publisher.
+        assertSame(ForeignPlatform, dslPlatform)
     }
 
     @Test
-    fun `a root of its own renders when it is not the process owner`() {
+    fun `a page built for this window belongs to the root this window renders`() {
         publishForeignPlatform()
+        val built = buildWindow()
 
-        val utils = WindowUtils()
-        val platform = WindowPlatform(utils)
-        val provider = WindowRootProvider(platform, utils)
+        val holder = built.window.create(built.platform, "a page", dslFunction = { })
 
-        val root = DslRuntime.createRoot(provider, ViewerLifetime.PROCESS)
-        // `isRegistered` is a member extension of the runtime object, so it needs its receiver here.
-        with(DslRuntime) { assertTrue(root.isRegistered, "a published platform must let this backend create a root") }
-        assertFalse(root.isOwner, "createRoot never creates the owner root")
-
-        val surface = BufferedImage(SURFACE_WIDTH, SURFACE_HEIGHT, BufferedImage.TYPE_INT_ARGB)
-        val graphics = surface.createGraphics()
-        try {
-            provider.frame(root, WindowRenderParam(graphics, SURFACE_WIDTH, SURFACE_HEIGHT))
-        } finally {
-            graphics.dispose()
-        }
-
-        assertEquals(SURFACE_WIDTH.toDouble(), root.rect.right.raw, 0.0)
-        assertEquals(SURFACE_HEIGHT.toDouble(), root.rect.bottom.raw, 0.0)
+        // The page's store is what its components read the tree through, so this says "the page is
+        // on my root", not merely "something was called".
+        assertSame(built.root, holder.dslScreen.dataStore.root)
         assertSame(ForeignPlatform, dslPlatform)
     }
 

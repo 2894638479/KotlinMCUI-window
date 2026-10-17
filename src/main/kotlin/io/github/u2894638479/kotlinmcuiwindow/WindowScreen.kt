@@ -10,9 +10,9 @@ import io.github.u2894638479.kotlinmcui.dsl.DslFunction
  * about the window itself.
  *
  * A page owns two things the framework reads - [dataStore] and [dslScreen] - and the tree slot it
- * occupies while it is the visible page. Creating one puts nothing on screen and nothing on the
+ * occupies in the root it was built for. Creating one puts nothing on screen and nothing on the
  * desktop: the window belongs to [WindowFrame], and where a page sits in the window's stack is
- * decided by [WindowRootProvider] when the page is shown.
+ * decided by the window when the page is shown.
  *
  * ### Mounting, unmounting and releasing
  * The three states are the page stack itself. [mount] makes the page the tree its root renders,
@@ -29,7 +29,7 @@ import io.github.u2894638479.kotlinmcui.dsl.DslFunction
  */
 class WindowScreen internal constructor(
     private val platform: WindowPlatform,
-    private val provider: WindowRootProvider,
+    private val root: DslRoot,
     private val frame: WindowFrame,
     val width: Int,
     val height: Int,
@@ -37,34 +37,31 @@ class WindowScreen internal constructor(
     dslFunction: DslFunction,
 ) {
     private var child: DslChild? = null
-    private var mountedOn: DslRoot? = null
     private var released = false
 
     /**
      * The page's own close action is [WindowFrame.pop]: closing the screen is leaving the stack,
      * which is what the game backend's action does when it hands the platform the screen below.
      */
-    val dataStore = DslDataStore(platform, provider, title, { frame.pop() }, dslFunction)
+    val dataStore = DslDataStore(platform, root, title, { frame.pop() }, dslFunction)
     val dslScreen = dataStore.dslScreen
 
     /**
-     * Make this page the rendered tree of [root].
+     * Make this page the rendered tree of the root it was built for.
      *
      * The root's child list is appended to rather than rebuilt: the framework's overlay layer is
      * collected into it once, when the list is first touched, and dropping it would take the
      * overlays down with it.
      */
-    internal fun mount(root: DslRoot) {
+    internal fun mount() {
         check(!released) { "page '$title' was released and cannot be shown again" }
         if (child != null) return
-        mountedOn = root
         child = root.children.collect(dslScreen)
     }
 
     /** Take this page out of the rendered tree, leaving everything it declared in place. */
     internal fun unmount() {
         val mounted = child ?: return
-        val root = mountedOn ?: return
         child = null
         root.children.remove(mounted)
     }

@@ -1,0 +1,57 @@
+package io.github.u2894638479.kotlinmcuiwindow
+
+import io.github.u2894638479.kotlinmcui.backend.DslPlatform
+import io.github.u2894638479.kotlinmcui.backend.DslPreview
+import io.github.u2894638479.kotlinmcui.backend.DslRootScreenFactory
+import io.github.u2894638479.kotlinmcui.backend.DslRuntime
+import io.github.u2894638479.kotlinmcui.container.DslRoot
+import io.github.u2894638479.kotlinmcui.dsl.DslFunction
+import io.github.u2894638479.kotlinmcui.entry.DslEntryPage
+
+/** What [startWindow] hands back: the process pieces and the root this window renders. */
+internal class WindowSession(
+    val platform: WindowPlatform,
+    val utils: WindowUtils,
+    val root: DslRoot,
+    /** Whether this call published the process platform; `false` means another backend owns it. */
+    val published: Boolean,
+)
+
+/**
+ * Build this backend's root and window, and open it.
+ *
+ * `install` is not called here: in a game the headless backend installs the metadata before any
+ * client entry runs, and the standalone path installs it itself before calling this. Everything else
+ * is this backend's own - the platform, the root, the window and the frame loop.
+ *
+ * Not owning the platform is not a failure: [DslRuntime.start] returns `false` when another backend
+ * published first, and this window still renders the root built below with its own renderer.
+ */
+internal fun startWindow(): WindowSession {
+    val utils = WindowUtils()
+    val platform = WindowPlatform(utils)
+    val published = DslRuntime.start { platform }
+
+    val input = WindowInput()
+    val renderer = WindowRenderer()
+    val window = WindowFrame(renderer, input)
+    val screenFactory = DslRootScreenFactory<WindowScreen> { title, dslFunction ->
+        window.create(platform, title, dslFunction)
+    }
+    // The root is this backend's own: rendering, input, screens and the per-output helpers all come
+    // from it, so another backend's root is never touched.
+    val root = DslRoot(input, renderer, screenFactory, utils)
+    window.attach(root)
+    input.root = root
+    utils.frame = window
+
+    window.open(screenFactory.create(ROOT_TITLE) { DslEntryPage() }.screen)
+
+    // The runtime no longer starts a preview session when a platform is published; it has to be
+    // handed this root. Unconditional is right: it does nothing unless -Dkotlinmcui.preview asked
+    // for a page, and the preview draws into the root it is given.
+    DslPreview.start(root)
+    return WindowSession(platform, utils, root, published)
+}
+
+private const val ROOT_TITLE = "KotlinMCUI"

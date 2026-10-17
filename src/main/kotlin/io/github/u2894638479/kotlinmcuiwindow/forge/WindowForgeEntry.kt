@@ -1,11 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow.forge
 
-import io.github.u2894638479.kotlinmcui.backend.DslRuntime
-import io.github.u2894638479.kotlinmcui.container.ViewerLifetime
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
-import io.github.u2894638479.kotlinmcuiwindow.WindowPlatform
-import io.github.u2894638479.kotlinmcuiwindow.WindowRootProvider
-import io.github.u2894638479.kotlinmcuiwindow.WindowUtils
+import io.github.u2894638479.kotlinmcuiwindow.startWindow
 import net.minecraftforge.fml.common.Mod
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext
@@ -29,8 +25,8 @@ private const val MOD_ID = "kotlinmcuiwindow"
  *
  * Nothing here touches a Minecraft class, so the constructor cannot run before the game is ready.
  *
- * Only the call that publishes may put a window up: if another backend was published first, the
- * framework in this process is that backend's, so this one stays down and says so.
+ * The window goes up whether or not this call published the platform: a process whose platform
+ * another backend owns still gets a window here, rendering a root of this backend's own.
  */
 @Mod(MOD_ID)
 @Suppress("DEPRECATION")
@@ -45,16 +41,8 @@ class WindowForgeEntry {
     private fun clientSetup() {
         // The window goes up here rather than from the constructor: by this point the headless
         // backend has installed the framework, so the entry list it opens with has entries to list.
-        val utils = WindowUtils()
-        val platform = WindowPlatform(utils)
-        val provider = WindowRootProvider(platform, utils)
-        // Losing the platform slot is not the same as being unusable: the slot belongs to the
-        // process, and this window still renders a root of its own in a process another backend
-        // platform owns.
-        if (!DslRuntime.platformReady { platform }) {
+        if (!startWindow().published) {
             dslLogger.warn("window: another platform owns this process; this window renders its own root")
         }
-        DslRuntime.registerProvider(provider)
-        provider.open(DslRuntime.rootFor(provider, ViewerLifetime.PROCESS))
     }
 }

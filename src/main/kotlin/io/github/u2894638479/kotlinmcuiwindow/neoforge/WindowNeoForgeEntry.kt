@@ -1,11 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow.neoforge
 
-import io.github.u2894638479.kotlinmcui.backend.DslRuntime
-import io.github.u2894638479.kotlinmcui.container.ViewerLifetime
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
-import io.github.u2894638479.kotlinmcuiwindow.WindowPlatform
-import io.github.u2894638479.kotlinmcuiwindow.WindowRootProvider
-import io.github.u2894638479.kotlinmcuiwindow.WindowUtils
+import io.github.u2894638479.kotlinmcuiwindow.startWindow
 import net.neoforged.bus.api.IEventBus
 import net.neoforged.fml.common.Mod
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent
@@ -23,8 +19,8 @@ private const val MOD_ID = "kotlinmcuiwindow"
  * NeoForge injects `IEventBus` into a mod's constructor and has done so for every version this jar
  * targets. Nothing here touches a Minecraft class.
  *
- * Only the call that publishes may put a window up: if another backend was published first, the
- * framework in this process is that backend's, so this one stays down and says so.
+ * The window goes up whether or not this call published the platform: a process whose platform
+ * another backend owns still gets a window here, rendering a root of this backend's own.
  */
 @Mod(MOD_ID)
 class WindowNeoForgeEntry(modBus: IEventBus) {
@@ -38,16 +34,8 @@ class WindowNeoForgeEntry(modBus: IEventBus) {
     private fun clientSetup() {
         // The window goes up here rather than from the constructor: by this point the headless
         // backend has installed the framework, so the entry list it opens with has entries to list.
-        val utils = WindowUtils()
-        val platform = WindowPlatform(utils)
-        val provider = WindowRootProvider(platform, utils)
-        // Losing the platform slot is not the same as being unusable: the slot belongs to the
-        // process, and this window still renders a root of its own in a process another backend
-        // platform owns.
-        if (!DslRuntime.platformReady { platform }) {
+        if (!startWindow().published) {
             dslLogger.warn("window: another platform owns this process; this window renders its own root")
         }
-        DslRuntime.registerProvider(provider)
-        provider.open(DslRuntime.rootFor(provider, ViewerLifetime.PROCESS))
     }
 }

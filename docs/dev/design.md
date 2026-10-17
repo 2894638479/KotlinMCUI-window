@@ -12,22 +12,20 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 ## 与无界面后端的分工
 
-无界面后端（`kotlinmcuibackend`）负责 `install`（元数据与入口发现）；这一份发布 `DslPlatform`（元数据、进程级工具、进程级 dispatcher）并向运行时**注册**自己的 `DslRootProvider`——绘制、输入、页面工厂与每帧的 `frame(root, renderParam)` 都在 provider 上。无界面后端发现 `kotlinmcuiwindow` 已安装时保持沉默。
+无界面后端（`kotlinmcuibackend`）负责 `install`（元数据与入口发现）；这一份用 `DslRuntime.start` 发布 `DslPlatform`（元数据、进程级工具、进程级 dispatcher），并**自己构造根** `DslRoot(input, renderer, screenFactory, utils)`——绘制、输入、页面与每帧循环都在本仓，核心不再持有 provider。无界面后端发现 `kotlinmcuiwindow` 已安装时保持沉默。
 
-启动顺序上有三条真约束，但**它们不是一条链**：
+启动顺序只有三条约束：
 
 - `install` 必须在最前（重复调用会抛）。
-- **选根（`DslRuntime.rootFor`）必须在 `registerProvider` 之后调**：它按"列表首位是不是这个 provider"决定给进程主根还是新根，注册前调会拿到新根。
-- `platformReady` 必须早于任何对平台的读（`dslPlatform`、`platform.utils` 等）。
+- `start` 必须早于任何对平台的读（`dslPlatform`、`platform.utils` 等）；它返回 `false` 只说明计划平台槽的是别人，**不早退**。
+- **根由本仓自己构造**（`DslRoot(...)`），构造之后再 `DslPreview.start(root)` 并开窗：运行时不再顺带起预览，漏了不会编译失败，只会"预览不启动"。
 
-`registerProvider` 与 `platformReady` 的**先后是自由的**（反过来做同样成立），不要把其中一种顺序当成规则——写反了不是 bug。
-
-**没能成为进程平台 ≠ 本后端不可用。** 平台槽归进程（第一个发布者），渲染归根：`platformReady` 返回 false 时仍然 `registerProvider` 并建自己的根——选根用 `DslRuntime.rootFor(provider, ViewerLifetime.PROCESS)`；页面用**自己的 `WindowPlatform` 对象**构建，而 `dslPlatform` 仍是别的后端的。这样它能在 MC/web 已发布平台的进程里继续出窗口。
-输入转发同理：**每个事件都要送到本窗口渲染的那个根**，不能读 `ownerRoot`——共存进程里那会把光标与键盘派给别人的树，而且完全静默（一个对不上焦点的根本来就看起来像处理过了）。`ownerRoot` 已 `internal`，后端连引用都做不到——选根只经 `rootFor`，其余一切都接参数。
+**没能成为进程平台 ≠ 本后端不可用。** 平台槽归进程（第一个发布者），渲染归根：`start` 返回 false 时仍然构造自己的根并开窗；页面用**自己的 `WindowPlatform` 对象**构建，而 `dslPlatform` 仍是别的后端的。这样它能在 MC/web 已发布平台的进程里继续出窗口。
+输入转发同理：**每个事件都要送到本窗口渲染的那个根**，不能去读任何全局根——共存进程里那会把光标与键盘派给别人的树，而且完全静默（一个对不上焦点的根本来就看起来像处理过了）。根由本仓自己构造，所以输入持有它、窗口持有它、页面持有它，**处处接参数**。
 
 配对是**单向**的：这一份的元数据声明依赖无界面后端，反向则不是——无界面后端只在运行期用加载器的 mod 列表判断，不在元数据里引用这一份。这样无界面后端单独装也是完整可用的。
 
-发布时机不能在构造期：`platformReady` 内部要求元数据已 `install`，所以 Fabric 用 `ClientModInitializer`（loader 保证它在 `ModInitializer` 之后），Forge/NeoForge 用各自的客户端 setup 事件。
+发布时机不能在构造期：`start` 内部要求元数据已 `install`，所以 Fabric 用 `ClientModInitializer`（loader 保证它在 `ModInitializer` 之后），Forge/NeoForge 用各自的客户端 setup 事件。
 
 ## AWT 的 headless 必须在最早的入口清掉
 
@@ -60,12 +58,16 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 - 不定位输入法候选窗口：Swing 没有这个 API，候选窗由输入法自己放置。
 - 不做无障碍朗读（没有到读屏软件的桥），不播放按钮音效（唯一能发的是系统蜂鸣，比静音更糟）。
 
-## 迁移到 provider 角色：常见坑
+## 每帧循环由后端自己写
 
-`DslRootProvider` **不需要**实现 `DslBackendRenderer`，也**不要**让 provider `by renderer` 去冒充渲染器——那会把平台角色与渲染角色混在一个对象上。provider 只是**持有**渲染器，并在 `frame()` 里把渲染器当作 context 实参传进去：
+核心不再替后端驱动帧。一帧就是三步，按这个顺序：
 
-```kotlin
-context(renderer, renderParam, input.mouse) { root.component.render() }
-```
+1. 把表面尺寸写给根与渲染器：`root.rect`（渲染 pass 会把它拷到每个已挂载的屏）与渲染器的 surface 尺寸（scale 由此派生）；
+2. `context(renderer, renderParam, input.mouse) { root.component.render() }`——渲染器作为 context 实参传进去，不要让别的角色去"冒充"渲染器；
+3. `renderer.flush()`。
 
-`frame()` 还要**先把根矩形写成输出尺寸、再渲染**：渲染 pass 会把那个矩形拷到每个已挂载的屏。顺序反了，屏会按上一帧的尺寸布局。
+顺序反了，屏会按上一帧的尺寸布局；第 2 步漏掉，窗口就是一片空白。预览也不再由运行时顺带启动：`DslPreview.start(root)` 要显式调。
+
+## 构建：兄弟仓优先，且不静默回落
+
+本仓链接 `../kotlinmcui` 的核心产物：**只要兄弟仓存在就只用它**，缺主 jar 或缺 `-sources.jar` 都直接构建失败并指出该跑哪个任务（`jar` / `sourcesJar`）。曾经的写法是"本地缺失就回落到 jitpack"，而缓存里的发布版可能已是几个月前的核心——构建绿了，编的却是另一份库。
