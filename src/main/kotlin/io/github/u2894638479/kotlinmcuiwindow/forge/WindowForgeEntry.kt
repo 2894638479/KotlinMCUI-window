@@ -2,7 +2,9 @@ package io.github.u2894638479.kotlinmcuiwindow.forge
 
 import io.github.u2894638479.kotlinmcui.backend.DslRuntime
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
-import io.github.u2894638479.kotlinmcuiwindow.WindowBackend
+import io.github.u2894638479.kotlinmcuiwindow.WindowPlatform
+import io.github.u2894638479.kotlinmcuiwindow.WindowRootProvider
+import io.github.u2894638479.kotlinmcuiwindow.WindowUtils
 import net.minecraftforge.fml.common.Mod
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext
@@ -42,11 +44,14 @@ class WindowForgeEntry {
     private fun clientSetup() {
         // The window goes up here rather than from the constructor: by this point the headless
         // backend has installed the framework, so the entry list it opens with has entries to list.
-        val backend = WindowBackend()
-        if (!DslRuntime.platformReady { backend }) {
-            dslLogger.warn("window: another backend was published first; this window stays down")
+        val utils = WindowUtils()
+        val platform = WindowPlatform(utils)
+        val provider = WindowRootProvider(platform, utils)
+        if (!DslRuntime.platformReady { platform }) {
+            dslLogger.warn("window: another platform was published first; this window stays down")
             return
         }
-        backend.open()
+        DslRuntime.registerProvider(provider)
+        provider.open()
     }
 }

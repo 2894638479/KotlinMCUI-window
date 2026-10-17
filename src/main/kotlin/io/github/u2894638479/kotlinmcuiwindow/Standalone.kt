@@ -30,33 +30,36 @@ fun main(args: Array<String>) {
     val preview = System.getProperty(PREVIEW_PROPERTY)?.takeIf { it.isNotBlank() }
 
     DslRuntime.install { WindowMetadata }
-    val backend = WindowBackend()
-    // The result is deliberately not checked. This process has exactly one backend, and the `install`
+    val utils = WindowUtils()
+    val platform = WindowPlatform(utils)
+    val provider = WindowRootProvider(platform, utils)
+    // The result is deliberately not checked. This process has exactly one platform, and the `install`
     // above would have thrown had another one installed the framework first, so this call cannot be
-    // refused. Testing it here would read as if a game's own client backend could take the window
+    // refused. Testing it here would read as if a game's own client platform could take the window
     // away from the standalone run, which cannot happen.
-    DslRuntime.platformReady { backend }
-    backend.open()
+    DslRuntime.platformReady { platform }
+    DslRuntime.registerProvider(provider)
+    provider.open()
     dslLogger.info("standalone: window shown with the entry list at the bottom of its stack")
 
     // A preview session photographs and quits on its own; this path is for a plain standalone run.
-    if (captureName != null && preview == null) captureAndExit(backend, captureName)
+    if (captureName != null && preview == null) captureAndExit(platform, provider, captureName)
 }
 
-private fun captureAndExit(backend: WindowBackend, fileName: String) {
+private fun captureAndExit(platform: WindowPlatform, provider: WindowRootProvider, fileName: String) {
     val delay = System.getProperty(CAPTURE_DELAY_PROPERTY)?.toLongOrNull() ?: DEFAULT_CAPTURE_DELAY_MILLIS
     // A daemon thread: the window's own event dispatch thread is what keeps the process alive, and
     // this one only has to wait for the page to have painted before photographing it.
     Thread {
         Thread.sleep(delay)
-        val file = runBlocking { backend.capture(fileName) }
+        val file = runBlocking { provider.rootUtils.capture(fileName) }
         if (file == null) {
             dslLogger.error("standalone: no screenshot was written for '$fileName'")
-            backend.quit(1)
+            platform.utils.quit(1)
             return@Thread
         }
         dslLogger.info("standalone: wrote ${file.absolutePath}")
-        backend.quit(0)
+        platform.utils.quit(0)
     }.apply {
         isDaemon = true
         name = "kotlinmcuiwindow-capture"

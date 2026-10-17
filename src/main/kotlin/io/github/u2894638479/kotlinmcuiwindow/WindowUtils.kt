@@ -1,6 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
-import io.github.u2894638479.kotlinmcui.backend.DslBackendUtils
+import io.github.u2894638479.kotlinmcui.backend.DslPlatformUtils
+import io.github.u2894638479.kotlinmcui.backend.DslRootUtils
 import io.github.u2894638479.kotlinmcui.image.ImageHolder
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import io.github.u2894638479.kotlinmcui.math.px
@@ -25,7 +26,7 @@ import kotlin.system.exitProcess
  * game, because there is no game to ask. [translate] answers from the framework's own language
  * files, which travel in the core library's jar and are therefore on this classpath already.
  */
-internal class WindowUtils : DslBackendUtils {
+internal class WindowUtils : DslPlatformUtils, DslRootUtils {
     /**
      * The window these utilities photograph and close.
      *
@@ -69,9 +70,9 @@ internal class WindowUtils : DslBackendUtils {
         }
     }
 
-    override val mainDispatcher: CoroutineDispatcher get() = EdtDispatcher
+    override val sessionDispatcher: CoroutineDispatcher get() = EdtDispatcher
 
-    override suspend fun capture(fileName: String): File? = withContext(mainDispatcher) { captureNow(fileName) }
+    override suspend fun capture(fileName: String): File? = withContext(sessionDispatcher) { captureNow(fileName) }
 
     override fun quit(exitCode: Int) {
         frame?.close()

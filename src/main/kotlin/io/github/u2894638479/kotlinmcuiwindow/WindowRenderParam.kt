@@ -18,6 +18,10 @@ import java.awt.geom.AffineTransform
 class WindowRenderParam(
     /** The surface the current frame is being painted on. */
     val graphics: Graphics2D,
+    /** Width of the surface this frame paints, which is what the root's scale is derived from. */
+    val width: Int = 0,
+    /** Height of the surface this frame paints. */
+    val height: Int = 0,
 ) {
     /** The transform currently in effect, which is the one on [graphics]. */
     val transform: AffineTransform get() = graphics.transform

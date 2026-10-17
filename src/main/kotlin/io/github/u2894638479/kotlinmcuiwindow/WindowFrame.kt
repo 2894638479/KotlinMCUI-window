@@ -1,6 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
+import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import java.awt.Dimension
 import java.awt.Frame
@@ -50,7 +51,7 @@ import javax.swing.WindowConstants
  */
 internal fun endsPage(stackSize: Int) = stackSize > 1
 
-internal class WindowFrame(private val painter: WindowBackend, private val input: WindowInput) {
+internal class WindowFrame(private val provider: WindowRootProvider, private val input: WindowInput) {
     private companion object {
         /** ~60 frames per second, the same cadence the game's own screen loop runs at. */
         const val FRAME_MILLIS = 16
@@ -69,6 +70,9 @@ internal class WindowFrame(private val painter: WindowBackend, private val input
     private var popping = false
     private var closed = false
 
+    /** The root this window renders, set by [open]. */
+    private var root: DslRoot? = null
+
     /** The page being rendered, or `null` while no window is up. */
     internal fun top(): WindowScreen? = pages.lastOrNull()
 
@@ -81,10 +85,11 @@ internal class WindowFrame(private val painter: WindowBackend, private val input
      * The whole window belongs to this one call: a second one while it is up is a caller that has
      * not understood that this backend is a window and not a window manager.
      */
-    internal fun open(page: WindowScreen) {
+    internal fun open(root: DslRoot, page: WindowScreen) {
         onEdt {
             check(frame == null && pages.isEmpty()) { "the window is already open" }
             closed = false
+            this.root = root
             push(page)
         }
     }
@@ -100,7 +105,7 @@ internal class WindowFrame(private val painter: WindowBackend, private val input
                 pages.addLast(page)
                 start(page)
                 frame?.title = page.title
-                page.mount()
+                page.mount(checkNotNull(root) { "the window was pushed before it was opened" })
                 focusSurface()
             } finally {
                 updating = false
@@ -136,7 +141,7 @@ internal class WindowFrame(private val painter: WindowBackend, private val input
             page.release()
             val previous = pages.last()
             frame?.title = previous.title
-            previous.mount()
+            previous.mount(checkNotNull(root) { "the window was pushed before it was opened" })
             focusSurface()
         } finally {
             popping = false
@@ -313,7 +318,8 @@ internal class WindowFrame(private val painter: WindowBackend, private val input
                 copy.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE)
                 // `width` and `height` are the panel's own, so a resize is a new frame size: the
                 // framework lays the page out into it on this very frame.
-                painter.paint(copy, width, height)
+                val root = root ?: return
+                provider.frame(root, WindowRenderParam(copy, width, height))
             } catch (e: Throwable) {
                 // Swallowing it keeps the window alive for the next frame - a page that throws once
                 // may well paint the frame after - while `renderFailure`, which the

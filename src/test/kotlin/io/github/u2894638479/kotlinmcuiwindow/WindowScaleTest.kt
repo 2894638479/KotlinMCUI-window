@@ -27,7 +27,7 @@ class WindowScaleTest {
 
     @Test
     fun `a surface that has not been painted yet is one`() {
-        // WindowBackend sets the size in paint, so a page built before the first frame sees this.
+        // The root provider sets the size in frame(), so a page built before the first frame sees this.
         assertEquals(1.0, guiScaleFor(0, 0))
     }
 

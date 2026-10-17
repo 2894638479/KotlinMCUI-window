@@ -2,7 +2,9 @@ package io.github.u2894638479.kotlinmcuiwindow.fabric
 
 import io.github.u2894638479.kotlinmcui.backend.DslRuntime
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
-import io.github.u2894638479.kotlinmcuiwindow.WindowBackend
+import io.github.u2894638479.kotlinmcuiwindow.WindowPlatform
+import io.github.u2894638479.kotlinmcuiwindow.WindowRootProvider
+import io.github.u2894638479.kotlinmcuiwindow.WindowUtils
 import net.fabricmc.api.ClientModInitializer
 
 /**
@@ -23,11 +25,14 @@ import net.fabricmc.api.ClientModInitializer
  */
 class WindowFabricEntry : ClientModInitializer {
     override fun onInitializeClient() {
-        val backend = WindowBackend()
-        if (!DslRuntime.platformReady { backend }) {
-            dslLogger.warn("window: another backend was published first; this window stays down")
+        val utils = WindowUtils()
+        val platform = WindowPlatform(utils)
+        val provider = WindowRootProvider(platform, utils)
+        if (!DslRuntime.platformReady { platform }) {
+            dslLogger.warn("window: another platform was published first; this window stays down")
             return
         }
-        backend.open()
+        DslRuntime.registerProvider(provider)
+        provider.open()
     }
 }
