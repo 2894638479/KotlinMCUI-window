@@ -68,6 +68,9 @@ internal class WindowRootProvider(
      * window renders a root of its own instead. The window is still the same window either way.
      */
     internal fun open(root: DslRoot) {
+        // Input has to reach this root, not the process owner root, so it is attached before the
+        // window is shown rather than looked up per event.
+        windowInput.root = root
         window.open(root, factory.create(ROOT_TITLE) { DslEntryPage() }.screen)
     }
 

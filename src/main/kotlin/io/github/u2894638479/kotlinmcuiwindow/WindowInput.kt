@@ -1,7 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.backend.DslBackendInput
-import io.github.u2894638479.kotlinmcui.backend.DslRuntime
+import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.input.Key
 import io.github.u2894638479.kotlinmcui.input.KeyModifiers
 import io.github.u2894638479.kotlinmcui.input.MouseButton
@@ -29,6 +29,16 @@ import java.awt.event.MouseWheelEvent
  * needs its own state without needing its own copy of the table.
  */
 internal class WindowInput : DslBackendInput {
+    /**
+     * The root this window renders, attached by its provider before the window is shown.
+     *
+     * Input must reach *this* root. Reading the process owner root here instead would send the
+     * cursor and the keyboard to another backend's tree in a process where that backend registered
+     * its provider first - silently, because a root with no focusable child under the cursor looks
+     * exactly like input that was handled and ignored.
+     */
+    var root: DslRoot? = null
+
     override var mouse = Position(0.px, 0.px)
         private set
 
@@ -64,29 +74,33 @@ internal class WindowInput : DslBackendInput {
 
     fun mouseMoved(x: Int, y: Int) {
         mouse = Position(x.px, y.px)
-        guarded("a cursor move", Unit) { context(mouse) { DslRuntime.ownerRoot.component.mouseMove() } }
+        val root = root ?: return
+        guarded("a cursor move", Unit) { context(mouse) { root.component.mouseMove() } }
     }
 
     fun mousePressed(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
         heldButtons.add(button.ordinal)
-        return guarded("a mouse press", false) { context(mouse, modifiersOf(event)) { DslRuntime.ownerRoot.component.mouseDown(button) } }
+        val root = root ?: return false
+        return guarded("a mouse press", false) { context(mouse, modifiersOf(event)) { root.component.mouseDown(button) } }
     }
 
     fun mouseReleased(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
         heldButtons.remove(button.ordinal)
-        return guarded("a mouse release", false) { context(mouse, modifiersOf(event)) { DslRuntime.ownerRoot.component.mouseUp(button) } }
+        val root = root ?: return false
+        return guarded("a mouse release", false) { context(mouse, modifiersOf(event)) { root.component.mouseUp(button) } }
     }
 
     fun mouseWheel(event: MouseWheelEvent) {
         // AWT counts wheel notches downwards and the framework counts them upwards, which is the
         // direction GLFW reports in.
+        val root = root ?: return
         val amount = -event.preciseWheelRotation
         guarded("a scroll", Unit) {
             context(mouse) {
-                if (event.isShiftDown) DslRuntime.ownerRoot.component.mouseScrollHorizontal(amount)
-                else DslRuntime.ownerRoot.component.mouseScrollVertical(amount)
+                if (event.isShiftDown) root.component.mouseScrollHorizontal(amount)
+                else root.component.mouseScrollVertical(amount)
             }
         }
     }
@@ -94,21 +108,24 @@ internal class WindowInput : DslBackendInput {
     fun keyPressed(event: KeyEvent): Boolean {
         val key = keyOf(event)
         heldKeys.add(key.code)
+        val root = root ?: return false
         // The framework reads a repeat as another press, which is what GLFW's GLFW_REPEAT path does,
         // so a repeated AWT event is passed straight through.
-        return guarded("a key press", false) { context(modifiersOf(event)) { DslRuntime.ownerRoot.component.keyDown(key, event.keyCode) } }
+        return guarded("a key press", false) { context(modifiersOf(event)) { root.component.keyDown(key, event.keyCode) } }
     }
 
     fun keyReleased(event: KeyEvent): Boolean {
         val key = keyOf(event)
         heldKeys.remove(key.code)
-        return guarded("a key release", false) { context(modifiersOf(event)) { DslRuntime.ownerRoot.component.keyUp(key, event.keyCode) } }
+        val root = root ?: return false
+        return guarded("a key release", false) { context(modifiersOf(event)) { root.component.keyUp(key, event.keyCode) } }
     }
 
     fun keyTyped(event: KeyEvent): Boolean {
+        val root = root ?: return false
         val typed = event.keyChar
         if (typed == KeyEvent.CHAR_UNDEFINED) return false
-        return guarded("a typed character", false) { context(modifiersOf(event)) { DslRuntime.ownerRoot.component.charTyped(typed) } }
+        return guarded("a typed character", false) { context(modifiersOf(event)) { root.component.charTyped(typed) } }
     }
 
     /** A window that loses focus never sees the key-up, so nothing may stay stuck down. */
