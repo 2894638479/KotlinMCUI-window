@@ -14,7 +14,13 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 无界面后端（`kotlinmcuibackend`）负责 `install`（元数据与入口发现）；这一份发布 `DslPlatform`（元数据、进程级工具、进程级 dispatcher）并向运行时**注册**自己的 `DslRootProvider`——绘制、输入、页面工厂与每帧的 `frame(root, renderParam)` 都在 provider 上。无界面后端发现 `kotlinmcuiwindow` 已安装时保持沉默。
 
-顺序是 `install` → `platformReady` → `registerProvider` → 读主根：`platformReady` 要求元数据已 `install`；主根由运行时用**第一个已注册的 provider** 懒创建，所以 provider 必须先注册，第一次读 `DslRuntime.ownerRoot` 才会成功。
+启动顺序上有三条真约束，但**它们不是一条链**：
+
+- `install` 必须在最前（重复调用会抛）。
+- **第一次读 `DslRuntime.ownerRoot` 之前必须已经 `registerProvider`**：主根由运行时用**第一个已注册的 provider** 懒创建，没注册就读会报错。
+- `platformReady` 必须早于任何对平台的读（`dslPlatform`、`platform.utils` 等）。
+
+`registerProvider` 与 `platformReady` 的**先后是自由的**（反过来做同样成立），不要把其中一种顺序当成规则——写反了不是 bug。
 
 配对是**单向**的：这一份的元数据声明依赖无界面后端，反向则不是——无界面后端只在运行期用加载器的 mod 列表判断，不在元数据里引用这一份。这样无界面后端单独装也是完整可用的。
 
