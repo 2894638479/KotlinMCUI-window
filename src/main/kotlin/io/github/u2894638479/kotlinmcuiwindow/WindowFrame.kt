@@ -1,7 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
-import io.github.u2894638479.kotlinmcui.backend.DslBackendScreenHolder
+import io.github.u2894638479.kotlinmcui.backend.DslScreenHolder
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import io.github.u2894638479.kotlinmcui.math.px
@@ -97,10 +97,10 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
         dslFunction: DslFunction,
         width: Int = DEFAULT_WIDTH,
         height: Int = DEFAULT_HEIGHT,
-    ): DslBackendScreenHolder<WindowScreen> {
+    ): DslScreenHolder<WindowScreen> {
         val root = checkNotNull(root) { "a page was created before this window was given its root" }
         val page = WindowScreen(platform, root, this, width, height, title, dslFunction)
-        return object : DslBackendScreenHolder<WindowScreen> {
+        return object : DslScreenHolder<WindowScreen> {
             override val screen = page
             override fun show() = push(page)
             override val dslScreen get() = page.dslScreen

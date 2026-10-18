@@ -1,6 +1,6 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
-import io.github.u2894638479.kotlinmcui.backend.DslBackendMetadata
+import io.github.u2894638479.kotlinmcui.backend.DslPlatformMetadata
 import io.github.u2894638479.kotlinmcui.backend.DslPlatform
 import io.github.u2894638479.kotlinmcui.backend.DslPlatformUtils
 import io.github.u2894638479.kotlinmcui.backend.DslRootScreenFactory
@@ -169,12 +169,12 @@ class WindowCoexistenceTest {
 }
 
 /** Metadata of the stub platform; nothing reads it in these cases, but a platform must answer it. */
-private object ForeignMetadata : DslBackendMetadata {
+private object ForeignMetadata : DslPlatformMetadata {
     override val configDir = Paths.get("build", "test-config")
     override val gameDir = Paths.get(".")
     override val gameVersion = "foreign"
     override val gameLoader = "test"
-    override val environment = Environment.COMMON
+    override val environment = Environment.NONE
 }
 
 /** The stub's process-level helpers. Only `quit` matters here, and it must not really exit. */
@@ -193,7 +193,7 @@ private object ForeignUtils : DslPlatformUtils {
  * thread builds it, so a pool would break the framework's thread checks rather than model a platform.
  */
 private object ForeignPlatform : DslPlatform {
-    override val metadata: DslBackendMetadata get() = ForeignMetadata
+    override val metadata: DslPlatformMetadata get() = ForeignMetadata
     override val utils: DslPlatformUtils get() = ForeignUtils
     override val dispatcher: CoroutineDispatcher get() = Dispatchers.Unconfined
 }

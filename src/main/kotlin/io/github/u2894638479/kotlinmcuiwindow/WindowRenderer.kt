@@ -1,6 +1,6 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
-import io.github.u2894638479.kotlinmcui.backend.DslBackendRenderer
+import io.github.u2894638479.kotlinmcui.backend.DslRootRenderer
 import io.github.u2894638479.kotlinmcui.backend.fillRect
 import io.github.u2894638479.kotlinmcui.context.DslScaleContext
 import io.github.u2894638479.kotlinmcui.image.ImageHolder
@@ -46,7 +46,7 @@ import kotlin.math.roundToInt
 /** The resolution of a Gouraud texture: an affine field needs no more than a few samples per axis. */
 private const val GOURAUD_SIZE = 32
 
-internal class WindowRenderer : DslBackendRenderer<WindowRenderParam> {
+internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
     /**
      * The surface the scale is derived from, set by the window's frame loop before every frame so it is
      * always the window's current size. Zero until the first paint, which the formula floors to 1.0.
@@ -93,7 +93,7 @@ internal class WindowRenderer : DslBackendRenderer<WindowRenderParam> {
             fillPolygon(xs, ys, averageOf(lt, rt, lb, rb).awt())
             return
         }
-        val texture = if (image == null || image.isEmpty || uv == null) null else WindowTextures.get(image)
+        val texture = if (image == null || image.id.isEmpty() || uv == null) null else WindowTextures.get(image)
         val source = if (texture == null) null else uv?.bounds()
         if (texture == null || source == null) {
             val paint = gradientPaint(l, t, r, b, lt, rt, lb, rb)
@@ -138,7 +138,7 @@ internal class WindowRenderer : DslBackendRenderer<WindowRenderParam> {
 
     context(renderParam: WindowRenderParam)
     override fun renderTriangles(vertices: FloatArray, colors: IntArray, image: ImageHolder?) {
-        val texture = image?.takeIf { !it.isEmpty }?.let { WindowTextures.get(it) }
+        val texture = image?.takeIf { it.id.isNotEmpty() }?.let { WindowTextures.get(it) }
         val stride = if (texture == null) 2 else 4
         // A malformed list is a caller bug; drawing nothing beats drawing garbage.
         if (colors.size * stride != vertices.size || colors.size % 3 != 0) return

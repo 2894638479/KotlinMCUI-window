@@ -72,6 +72,9 @@ internal class WindowUtils : DslPlatformUtils, DslRootUtils {
 
     override val sessionDispatcher: CoroutineDispatcher get() = EdtDispatcher
 
+    /** This root renders on the AWT event thread, so that is the thread "on session" means here. */
+    override val isOnSessionThread: Boolean get() = SwingUtilities.isEventDispatchThread()
+
     override suspend fun capture(fileName: String): File? = withContext(sessionDispatcher) { captureNow(fileName) }
 
     override fun quit(exitCode: Int) {

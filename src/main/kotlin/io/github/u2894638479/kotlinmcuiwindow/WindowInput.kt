@@ -1,6 +1,6 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
-import io.github.u2894638479.kotlinmcui.backend.DslBackendInput
+import io.github.u2894638479.kotlinmcui.backend.DslRootInput
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.input.Key
 import io.github.u2894638479.kotlinmcui.input.KeyModifiers
@@ -28,7 +28,7 @@ import java.awt.event.MouseWheelEvent
  * functions of one event and share nothing with the state this object keeps, so a second window
  * needs its own state without needing its own copy of the table.
  */
-internal class WindowInput : DslBackendInput {
+internal class WindowInput : DslRootInput {
     /**
      * The root this window renders, attached by its provider before the window is shown.
      *

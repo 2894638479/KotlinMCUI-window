@@ -1,6 +1,6 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
-import io.github.u2894638479.kotlinmcui.backend.DslBackendMetadata
+import io.github.u2894638479.kotlinmcui.backend.DslPlatformMetadata
 import io.github.u2894638479.kotlinmcui.backend.DslPlatform
 import io.github.u2894638479.kotlinmcui.backend.DslPlatformUtils
 import kotlinx.coroutines.CoroutineDispatcher
@@ -17,7 +17,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 internal class WindowPlatform(
     private val windowUtils: WindowUtils,
 ) : DslPlatform {
-    override val metadata: DslBackendMetadata get() = WindowMetadata
+    override val metadata: DslPlatformMetadata get() = WindowMetadata
 
     override val utils: DslPlatformUtils get() = windowUtils
 

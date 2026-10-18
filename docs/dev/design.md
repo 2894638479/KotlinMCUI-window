@@ -6,9 +6,9 @@
 
 这是"一个 jar 覆盖所有游戏版本与三个加载器"能成立的前提：jar 里没有任何 Minecraft 引用，也就没有需要跟着游戏版本走的东西。代价是软件渲染——每帧走 CPU，适合编辑器式界面，不适合高帧率游戏内 HUD。
 
-## 一个 jar，三份元数据
+## 一个 jar，三份元数据，零个入口类
 
-jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.toml，各自只引用自己的入口类，且都不写游戏版本上限。需要用别的平台时加一份元数据与一个入口即可。
+jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.toml，三份都**只有身份**（id、版本、依赖、图标），不声明 entrypoint、也没有 `@Mod` 类：它们唯一的作用是让 jar **进 classpath**。真正干活的是 `META-INF/services/` 里登记为 `DslEntryCommon` 的 `WindowEntry`——框架自己的发现按这份登记找入口，与 loader 无关。所以"支持另一个平台"只需要再加一份只有身份的元数据，不需要写入口类。
 
 ## 与无界面后端的分工
 
@@ -25,13 +25,13 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 配对是**单向**的：这一份的元数据声明依赖无界面后端，反向则不是——无界面后端只在运行期用加载器的 mod 列表判断，不在元数据里引用这一份。这样无界面后端单独装也是完整可用的。
 
-发布时机不能在构造期：`start` 内部要求元数据已 `install`，所以 Fabric 用 `ClientModInitializer`（loader 保证它在 `ModInitializer` 之后），Forge/NeoForge 用各自的客户端 setup 事件。
+发布时机在**启动阶段**：入口只在 `DslRuntime.launch()` 里被调用（游戏里由无界面后端触发，standalone 由 `Standalone.main` 触发），而这个阶段内部要求平台已发布，所以顺序恒为 `install` → `start` → `launch`。本仓没有 loader 入口类，因而也不存在"构造期发布"这个问题。
 
-## AWT 的 headless 必须在最早的入口清掉
+## AWT 的 headless 在入口对象初始化时清掉
 
 游戏进程启动时 `java.awt.headless` 是 `true`，而 AWT 会在第一次被使用时把这个值**缓存**下来：之后再改属性也无效，`JFrame` 只会在事件线程上抛 `HeadlessException`，被 Swing 吞掉后表现为"窗口不出现且什么都不报"。
 
-所以三个入口都在自己最早的入口先把它清成 `false` 再碰任何 AWT 类。Fabric 侧的入口是一段独立的 main 入口（`ModInitializer`），清完属性还会当场取一次默认工具包把取值固定下来；Forge/NeoForge 没有比 mod 构造函数更早的入口，只能在那里清。
+清掉它的地方是 `WindowEntry` 的**对象初始化**：框架发现入口时会实例化它，这远早于任何 AWT 使用；把属性改成 `false` 之后当场取一次默认工具包，把取值固定下来。条件是 `dslMetadata.environment == CLIENT`——专服同样会加载 `DslEntryCommon`，而那里一次都不该碰 AWT；standalone 走 `NONE`，本来就不是 headless，不需要清。
 
 ## 截图渲染内容，不是桌面抓屏
 

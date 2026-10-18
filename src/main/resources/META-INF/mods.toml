@@ -1,5 +1,6 @@
-# FML's own loader. lowcodefml names the Kotlin provider instead, and a mod that has an
-# @Mod class loaded with it never gets that class constructed - the entry point stays silent.
+# Identity only: this jar declares no @Mod class and no entry point. It has to be on the classpath for
+# the framework's own discovery to find its entry, so the descriptor names the mod and its
+# dependencies and nothing else.
 modLoader = "javafml"
 loaderVersion = "[0,)"
 issueTrackerURL = "${mod_issues}"

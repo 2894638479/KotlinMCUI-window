@@ -4,9 +4,12 @@ import io.github.u2894638479.kotlinmcui.backend.DslPlatform
 import io.github.u2894638479.kotlinmcui.backend.DslPreview
 import io.github.u2894638479.kotlinmcui.backend.DslRootScreenFactory
 import io.github.u2894638479.kotlinmcui.backend.DslRuntime
+import io.github.u2894638479.kotlinmcui.backend.Environment
+import io.github.u2894638479.kotlinmcui.backend.dslMetadata
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
 import io.github.u2894638479.kotlinmcui.entry.DslEntryPage
+import io.github.u2894638479.kotlinmcui.logger.dslLogger
 
 /** What [startWindow] hands back: the process pieces and the root this window renders. */
 internal class WindowSession(
@@ -27,10 +30,10 @@ internal class WindowSession(
  * Not owning the platform is not a failure: [DslRuntime.start] returns `false` when another backend
  * published first, and this window still renders the root built below with its own renderer.
  */
-internal fun startWindow(): WindowSession {
+internal fun startWindow(publish: Boolean = true): WindowSession {
     val utils = WindowUtils()
     val platform = WindowPlatform(utils)
-    val published = DslRuntime.start { platform }
+    val published = if (publish) DslRuntime.start { platform } else true
 
     val input = WindowInput()
     val renderer = WindowRenderer()
@@ -51,7 +54,30 @@ internal fun startWindow(): WindowSession {
     // handed this root. Unconditional is right: it does nothing unless -Dkotlinmcui.preview asked
     // for a page, and the preview draws into the root it is given.
     DslPreview.start(root)
-    return WindowSession(platform, utils, root, published)
+    val session = WindowSession(platform, utils, root, published)
+    // One window per process while the framework has no enumerable roots; the standalone harness
+    // reads it after the launch stage, because opening the window belongs to the entry now.
+    windowSession = session
+    return session
 }
+
+/**
+ * The entry's launch stage: build this backend's window, and say so when the platform slot belongs to
+ * someone else.
+ *
+ * In `Environment.NONE` the standalone main published this platform itself - the only other publisher
+ * in that process would be a second copy of this backend - so a refusal there is not news and must not
+ * be warned about. In a game the game's platform is the expected owner, and the warning is the point.
+ */
+internal fun enterWindow() {
+    val standalone = dslMetadata.environment == Environment.NONE
+    val session = startWindow(publish = !standalone)
+    if (!standalone && !session.published) {
+        dslLogger.warn("window: another platform owns this process; this window renders its own root")
+    }
+}
+
+/** The one window this process has. `null` until the launch stage ran. */
+internal var windowSession: WindowSession? = null
 
 private const val ROOT_TITLE = "KotlinMCUI"

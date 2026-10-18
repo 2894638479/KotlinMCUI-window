@@ -9,11 +9,12 @@ import java.awt.GraphicsEnvironment
  * Opens the window with no game behind it.
  *
  * This exists so the backend can be looked at on its own: everything under `src/main/kotlin` except
- * the three loader entry points is game-free, and this is the proof. It is also the only place that
- * calls `DslRuntime.install`, because there is no headless backend in this process to do it - inside
- * a game this file is never reached, and `install` is that backend's job there.
+ * the entry object registered in `META-INF/services` is game-free, and this is the proof. It is also
+ * the only place that calls `DslRuntime.install`, because there is no headless backend in this
+ * process to do it - inside a game this file is never reached, and `install` is that backend's job
+ * there.
  *
- * The window it opens is the same one the in-game entries open, with the framework's entry list at
+ * It publishes the platform and then triggers the framework's launch stage, which is what opens the\n * window (the entry's `launch`); the window is the same one an in-game session opens, with the\n * framework's entry list at
  * the bottom of its stack: that page is the framework's own, and it is what a person expects to see
  * when this backend is started on its own.
  *
@@ -34,7 +35,12 @@ fun main(args: Array<String>) {
     // and the `install` above would have thrown had another one installed the framework first, so
     // `start` cannot be refused. Testing it here would read as if a game's own client platform could
     // take the window away from the standalone run, which cannot happen.
-    val session = startWindow()
+    //
+    // The platform is published before the launch stage because that stage refuses to run without
+    // one; the window itself is opened by the entry, so nothing here may open it a second time.
+    DslRuntime.start { WindowPlatform(WindowUtils()) }
+    DslRuntime.launch()
+    val session = checkNotNull(windowSession) { "the window entry did not open a window" }
     dslLogger.info("standalone: window shown with the entry list at the bottom of its stack")
 
     // A preview session photographs and quits on its own; this path is for a plain standalone run.

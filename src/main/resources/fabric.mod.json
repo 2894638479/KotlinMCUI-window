@@ -15,17 +15,7 @@
     "license": "${license}",
     "icon": "${icon}",
     "environment": "client",
-    "entrypoints": {
-        "main": [
-            "io.github.u2894638479.kotlinmcuiwindow.fabric.WindowFabricAwtWarmup"
-        ],
-        "client": [
-            {
-                "value": "io.github.u2894638479.kotlinmcuiwindow.fabric.WindowFabricEntry",
-                "adapter": "kotlin"
-            }
-        ]
-    },
+
     "depends": {
         "fabricloader": "*",
         "minecraft": "*",
