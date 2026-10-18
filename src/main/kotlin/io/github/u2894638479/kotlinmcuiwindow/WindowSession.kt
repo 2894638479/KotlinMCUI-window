@@ -65,12 +65,12 @@ internal fun startWindow(publish: Boolean = true): WindowSession {
  * The entry's launch stage: build this backend's window, and say so when the platform slot belongs to
  * someone else.
  *
- * In `Environment.NONE` the standalone main published this platform itself - the only other publisher
+ * In `Environment.STANDALONE` the standalone main published this platform itself - the only other publisher
  * in that process would be a second copy of this backend - so a refusal there is not news and must not
  * be warned about. In a game the game's platform is the expected owner, and the warning is the point.
  */
 internal fun enterWindow() {
-    val standalone = dslMetadata.environment == Environment.NONE
+    val standalone = dslMetadata.environment == Environment.STANDALONE
     val session = startWindow(publish = !standalone)
     if (!standalone && !session.published) {
         dslLogger.warn("window: another platform owns this process; this window renders its own root")

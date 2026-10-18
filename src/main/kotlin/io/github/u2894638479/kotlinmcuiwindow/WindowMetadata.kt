@@ -38,10 +38,10 @@ internal object WindowMetadata : DslPlatformMetadata {
     override val gameLoader: String get() = ""
 
     /**
-     * This metadata describes the standalone process, which has no game side at all. In a game the
+     * This metadata describes a process with no game side at all. In a game the
      * headless backend installs its own metadata before any client entry runs, so this object is
      * never asked about a game - and reporting CLIENT here made the window believe it was in one and
      * warn that another backend owned the platform.
      */
-    override val environment: Environment get() = Environment.NONE
+    override val environment: Environment get() = Environment.STANDALONE
 }

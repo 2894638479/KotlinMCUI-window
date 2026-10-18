@@ -71,14 +71,28 @@ val coroutines = "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutines_vers
  * runtime, where the loaders' metadata declares the pairing.
  */
 val siblingCore = rootProject.file("../kotlinmcui")
-val coreLibrary: Any = if (siblingCore.isDirectory) {
+val coreJar: Any = if (siblingCore.isDirectory) {
     val jarFile = siblingCore.resolve("build/libs/kotlinmcui-$kotlinmcui_version.jar")
-    val sourceFile = siblingCore.resolve("build/libs/kotlinmcui-$kotlinmcui_version-sources.jar")
     check(jarFile.exists()) { "the local core jar is missing: run ./gradlew jar in $siblingCore" }
-    check(sourceFile.exists()) { "the local core sources jar is missing: run ./gradlew sourcesJar in $siblingCore" }
-    files(jarFile, sourceFile)
+    files(jarFile)
 } else {
     "com.github.2894638479:KotlinMCUI:v$kotlinmcui_version"
+}
+
+/**
+ * The sources jar, for navigation only.
+ *
+ * It must not reach a runtime classpath: Gradle's `sourcesJar` packs `src/main/resources` too, so it
+ * carries a second copy of `META-INF/kotlinmcui/entries` and every entry would be declared twice. The
+ * check below still runs whenever the sibling exists, so a half-built sibling fails at configuration
+ * time instead of silently compiling against the published artifact.
+ */
+val coreNavigation: Any? = if (siblingCore.isDirectory) {
+    val sourceFile = siblingCore.resolve("build/libs/kotlinmcui-$kotlinmcui_version-sources.jar")
+    check(sourceFile.exists()) { "the local core sources jar is missing: run ./gradlew sourcesJar in $siblingCore" }
+    files(sourceFile)
+} else {
+    null
 }
 
 /**
@@ -91,7 +105,8 @@ val standalone = configurations.create("standalone") {
 }
 
 dependencies {
-    compileOnly(coreLibrary)
+    compileOnly(coreJar)
+    coreNavigation?.let { compileOnly(it) }
     compileOnly(slf4j)
     compileOnly(fastutil)
     compileOnly(coroutines)
@@ -116,7 +131,7 @@ dependencies {
     compileOnly("net.neoforged.fancymodloader:loader:$neoforge_loader_version") { isTransitive = false }
     compileOnly("net.neoforged:bus:$neoforge_bus_version") { isTransitive = false }
 
-    standalone(coreLibrary)
+    standalone(coreJar)
     standalone(slf4j)
     // A logging backend, so the standalone run says what it is doing: nothing else on this classpath
     // implements the SLF4J binding the framework logs through.
@@ -131,7 +146,7 @@ dependencies {
     // most of what the framework needs at runtime is `compileOnly` for the main source set. Anything
     // the tests actually execute is therefore named here as well.
     testImplementation(kotlin("test"))
-    testImplementation(coreLibrary)
+    testImplementation(coreJar)
     testImplementation(slf4j)
     testImplementation(serializationJson)
     // The coexistence cases build a real root, so they need the framework's runtime pieces that
@@ -245,8 +260,31 @@ val standaloneJar = tasks.register<Jar>("standaloneJar") {
     archiveClassifier = "standalone"
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest { attributes["Main-Class"] = "io.github.u2894638479.kotlinmcuiwindow.StandaloneKt" }
-    from(sourceSets["main"].output)
-    from(standalone.map { if (it.isDirectory) it else zipTree(it) })
+    // The entry registry is a file every jar contributes a few lines to, and the classpath merges
+    // them. A fat jar has no classpath, so the merge has to happen here - otherwise one copy wins and
+    // the entries declared by the other jar vanish silently.
+    val mergedRegistry = layout.buildDirectory.dir("generated/entry-registry")
+    from(sourceSets["main"].output) { exclude("META-INF/kotlinmcui/entries") }
+    from(standalone.map { if (it.isDirectory) it else zipTree(it) }) {
+        exclude("META-INF/kotlinmcui/entries")
+    }
+    from(mergedRegistry)
+    doFirst {
+        val lines = LinkedHashSet<String>()
+        val registries = listOf(file("src/main/resources/META-INF/kotlinmcui/entries")) + standalone.files.toList()
+        registries.forEach { source ->
+            if (source.isFile && source.name.endsWith(".jar")) {
+                zipTree(source).matching { include("META-INF/kotlinmcui/entries") }.forEach { registry ->
+                    registry.readLines().filter { it.isNotBlank() }.forEach { line: String -> lines += line }
+                }
+            } else if (source.isFile) {
+                source.readLines().filter { it.isNotBlank() }.forEach { line: String -> lines += line }
+            }
+        }
+        val target = mergedRegistry.get().asFile.resolve("META-INF/kotlinmcui/entries")
+        target.parentFile.mkdirs()
+        target.writeText(lines.joinToString("\n") + "\n")
+    }
     // A program is not a mod: no loader metadata, so nothing mistakes it for one.
     exclude("fabric.mod.json","META-INF/mods.toml","META-INF/neoforge.mods.toml")
 }

@@ -174,7 +174,7 @@ private object ForeignMetadata : DslPlatformMetadata {
     override val gameDir = Paths.get(".")
     override val gameVersion = "foreign"
     override val gameLoader = "test"
-    override val environment = Environment.NONE
+    override val environment = Environment.STANDALONE
 }
 
 /** The stub's process-level helpers. Only `quit` matters here, and it must not really exit. */

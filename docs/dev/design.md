@@ -8,7 +8,7 @@
 
 ## 一个 jar，三份元数据，零个入口类
 
-jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.toml，三份都**只有身份**（id、版本、依赖、图标），不声明 entrypoint、也没有 `@Mod` 类：它们唯一的作用是让 jar **进 classpath**。真正干活的是 `META-INF/services/` 里登记为 `DslEntryCommon` 的 `WindowEntry`——框架自己的发现按这份登记找入口，与 loader 无关。所以"支持另一个平台"只需要再加一份只有身份的元数据，不需要写入口类。
+jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.toml，三份都**只有身份**（id、版本、依赖、图标），不声明 entrypoint、也没有 `@Mod` 类：它们唯一的作用是让 jar **进 classpath**。真正干活的是 `META-INF/kotlinmcui/entries` 里登记的一行——`<类名> client,standalone`：框架自己的发现先按环境列过滤、再加载类，与 loader 无关（专服因为不在环境列里，**连类都不会被加载**）。所以"支持另一个平台"只需要再加一份只有身份的元数据，不需要写入口类。
 
 ## 与无界面后端的分工
 
@@ -31,7 +31,7 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 游戏进程启动时 `java.awt.headless` 是 `true`，而 AWT 会在第一次被使用时把这个值**缓存**下来：之后再改属性也无效，`JFrame` 只会在事件线程上抛 `HeadlessException`，被 Swing 吞掉后表现为"窗口不出现且什么都不报"。
 
-清掉它的地方是 `WindowEntry` 的**对象初始化**：框架发现入口时会实例化它，这远早于任何 AWT 使用；把属性改成 `false` 之后当场取一次默认工具包，把取值固定下来。条件是 `dslMetadata.environment == CLIENT`——专服同样会加载 `DslEntryCommon`，而那里一次都不该碰 AWT；standalone 走 `NONE`，本来就不是 headless，不需要清。
+清掉它的地方是 `WindowEntry` 的**对象初始化**：框架发现入口时会实例化它，这远早于任何 AWT 使用；把属性改成 `false` 之后当场取一次默认工具包，把取值固定下来。条件是 `dslMetadata.environment == CLIENT`——专服上的注册文件不含 `server`，loader 在类加载前就把它滤掉，一次都不会碰 AWT；standalone 走 `STANDALONE`，本来就不是 headless，不需要清。
 
 ## 截图渲染内容，不是桌面抓屏
 

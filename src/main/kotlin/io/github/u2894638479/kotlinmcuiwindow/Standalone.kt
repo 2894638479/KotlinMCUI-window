@@ -9,7 +9,7 @@ import java.awt.GraphicsEnvironment
  * Opens the window with no game behind it.
  *
  * This exists so the backend can be looked at on its own: everything under `src/main/kotlin` except
- * the entry object registered in `META-INF/services` is game-free, and this is the proof. It is also
+ * the entry object registered in `META-INF/kotlinmcui/entries` is game-free, and this is the proof. It is also
  * the only place that calls `DslRuntime.install`, because there is no headless backend in this
  * process to do it - inside a game this file is never reached, and `install` is that backend's job
  * there.
