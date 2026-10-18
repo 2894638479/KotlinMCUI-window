@@ -31,7 +31,7 @@ object WindowEntry : DslEntryCommon {
 
     override val name: String get() = "KotlinMCUI Window"
 
-    override val id: String get() = "kotlinmcuiwindow"
+    override val id: String get() = MOD_ID
 
     override val icon: ImageHolder get() = ImageHolder("kotlinmcuiwindow:icon.png", 16.px, 16.px)
 

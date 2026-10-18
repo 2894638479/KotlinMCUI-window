@@ -13,6 +13,9 @@ import java.nio.file.Paths
  * is hosting the jar. The loader is read off the classpath rather than reported by a descriptor: the
  * answer stays correct when two loaders are present at once, which a development client does.
  */
+/** The mod id every descriptor in this jar declares; it is the only name a loader is given. */
+internal const val MOD_ID = "kotlinmcuiwindow"
+
 internal object WindowMetadata : DslPlatformMetadata {
     const val GAME_VERSION_PROPERTY = "kotlinmcuiwindow.gameVersion"
 
