@@ -4,6 +4,7 @@ import io.github.u2894638479.kotlinmcui.backend.Environment
 import io.github.u2894638479.kotlinmcui.backend.dslMetadata
 import io.github.u2894638479.kotlinmcui.entry.DslEntryService
 import io.github.u2894638479.kotlinmcui.image.ImageHolder
+import io.github.u2894638479.kotlinmcui.image.ImageSource
 import io.github.u2894638479.kotlinmcui.math.px
 import java.awt.Toolkit
 
@@ -13,7 +14,7 @@ import java.awt.Toolkit
  * A jar with no descriptor never reaches the classpath, and one whose descriptor declares no entry
  * points does reach it without anything being executed - so the three descriptors carry identity
  * only, and this object is what `META-INF/kotlinmcui/entries` declares, for `client` and `standalone`
- * and no other environment. Its [launch] runs once the platform is published: in a game the headless
+ * and no other environment. Its [launch] runs once the process-level helpers are published: in a game the headless
  * backend calls `DslRuntime.launch()`, in standalone `Standalone.main` does.
  */
 object WindowEntry : DslEntryService {
@@ -33,7 +34,7 @@ object WindowEntry : DslEntryService {
 
     override val id: String get() = MOD_ID
 
-    override val icon: ImageHolder get() = ImageHolder("kotlinmcuiwindow:icon.png", 16.px, 16.px)
+    override val icon: ImageHolder get() = ImageHolder(ImageSource.Resource("kotlinmcuiwindow:icon.png"), 16.px, 16.px)
 
     /**
      * The registry declares this entry for `client,standalone`, so a dedicated server never loads the

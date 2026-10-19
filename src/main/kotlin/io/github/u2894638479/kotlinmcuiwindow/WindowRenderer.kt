@@ -93,7 +93,7 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
             fillPolygon(xs, ys, averageOf(lt, rt, lb, rb).awt())
             return
         }
-        val texture = if (image == null || image.id.isEmpty() || uv == null) null else WindowTextures.get(image)
+        val texture = if (image == null || image.source == null || uv == null) null else WindowTextures.get(image)
         val source = if (texture == null) null else uv?.bounds()
         if (texture == null || source == null) {
             val paint = gradientPaint(l, t, r, b, lt, rt, lb, rb)
@@ -138,7 +138,7 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
 
     context(renderParam: WindowRenderParam)
     override fun renderTriangles(vertices: FloatArray, colors: IntArray, image: ImageHolder?) {
-        val texture = image?.takeIf { it.id.isNotEmpty() }?.let { WindowTextures.get(it) }
+        val texture = image?.takeIf { it.source != null }?.let { WindowTextures.get(it) }
         val stride = if (texture == null) 2 else 4
         // A malformed list is a caller bug; drawing nothing beats drawing garbage.
         if (colors.size * stride != vertices.size || colors.size % 3 != 0) return

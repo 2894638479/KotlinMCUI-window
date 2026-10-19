@@ -3,6 +3,7 @@ package io.github.u2894638479.kotlinmcuiwindow
 import io.github.u2894638479.kotlinmcui.backend.DslPlatformUtils
 import io.github.u2894638479.kotlinmcui.backend.DslRootUtils
 import io.github.u2894638479.kotlinmcui.image.ImageHolder
+import io.github.u2894638479.kotlinmcui.image.ImageSource
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import io.github.u2894638479.kotlinmcui.math.px
 import kotlinx.coroutines.CoroutineDispatcher
@@ -54,9 +55,25 @@ internal class WindowUtils : DslPlatformUtils, DslRootUtils {
 
     override val isInWorld: Boolean get() = false
 
-    override fun loadLocalImage(file: File): ImageHolder = WindowCaches.holders.getOrPut(file) { holderFor(file) }
+    override fun localImage(file: File): ImageHolder = WindowCaches.holders.getOrPut(file) { holderFor(file) }
 
-    override fun forceLoadLocalImage(file: File): ImageHolder = holderFor(file).also { WindowCaches.holders[file] = it }
+    /**
+     * There is no http stack behind this backend, so a url has no pixels: the holder is the empty
+     * sentinel rather than an exception. Drawing the quad's own colours is the same answer the
+     * framework gives for an image that has not arrived yet.
+     */
+    override fun remoteImage(url: String): ImageHolder = ImageHolder.empty
+
+    override fun reloadLocalImage(file: File) {
+        // Two caches answer for one file: the holder this backend hands out, and the decoded pixels
+        // the renderer keeps. Dropping only one would leave the next read reporting the old size.
+        WindowCaches.holders.remove(file)
+        WindowTextures.forget(ImageSource.LocalFile(file))
+    }
+
+    override fun reloadRemoteImage(url: String) {
+        WindowTextures.forget(ImageSource.Remote(url))
+    }
 
     override fun playButtonSound() {
         // A window has no UI sound set. The only sound the platform can make is a system beep, which
@@ -92,12 +109,10 @@ internal class WindowUtils : DslPlatformUtils, DslRootUtils {
      * enough that reading it on the event dispatch thread is not worth a second thread.
      */
     private fun holderFor(file: File): ImageHolder {
-        if (!file.isFile) return MISSING
-        val size = runCatching { ImageIO.read(file) }.getOrNull() ?: return MISSING
-        return ImageHolder(file.path, size.width.px, size.height.px)
+        if (!file.isFile) return ImageHolder.empty
+        val size = runCatching { ImageIO.read(file) }.getOrNull() ?: return ImageHolder.empty
+        return ImageHolder(ImageSource.LocalFile(file), size.width.px, size.height.px)
     }
-
-    private val MISSING = ImageHolder("missing", 16.px, 16.px)
 
     /**
      * Photographs the window this backend has on screen.

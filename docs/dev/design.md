@@ -12,20 +12,22 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 ## 与无界面后端的分工
 
-无界面后端（`kotlinmcuibackend`）负责 `install`（元数据与入口发现）；这一份用 `DslRuntime.start` 发布 `DslPlatform`（元数据、进程级工具、进程级 dispatcher），并**自己构造根** `DslRoot(input, renderer, screenFactory, utils)`——绘制、输入、页面与每帧循环都在本仓，核心不再持有 provider。无界面后端发现 `kotlinmcuiwindow` 已安装时保持沉默。
+无界面后端（`kotlinmcuibackend`）负责 `install`（元数据与入口发现）；这一份用 `DslRuntime.start` 发布进程级工具 `WindowUtils`（实现了 `DslPlatformUtils` 的实例；`DslPlatform` 这一层已删除），并**自己构造根** `DslRoot(input, renderer, screenFactory, utils)`——绘制、输入、页面与每帧循环都在本仓，核心不再持有 provider。无界面后端发现 `kotlinmcuiwindow` 已安装时保持沉默。
 
 启动顺序只有三条约束：
 
-- `install` 必须在最前（重复调用会抛）。
-- `start` 必须早于任何对平台的读（`dslPlatform`、`platform.utils` 等）；它返回 `false` 只说明计划平台槽的是别人，**不早退**。
+- `install` 必须在最前（重复调用会抛），元数据由 `install { WindowMetadata }` 提供。
+- `start` 必须早于任何对进程级工具的读（`dslUtils` 等）；它返回 `false` 只说明进程槽已被别人发布，**不早退**。
 - **根由本仓自己构造**（`DslRoot(...)`），构造之后再 `DslPreview.start(root)` 并开窗：运行时不再顺带起预览，漏了不会编译失败，只会"预览不启动"。
 
-**没能成为进程平台 ≠ 本后端不可用。** 平台槽归进程（第一个发布者），渲染归根：`start` 返回 false 时仍然构造自己的根并开窗；页面用**自己的 `WindowPlatform` 对象**构建，而 `dslPlatform` 仍是别的后端的。这样它能在 MC/web 已发布平台的进程里继续出窗口。
+**没能成为进程级工具的所有者 ≠ 本后端不可用。** 进程槽归进程（第一个发布者），渲染归根：`start` 返回 false 时仍然构造自己的根并开窗；页面用**本根自己的 `WindowUtils` 实例**构建，而 `dslUtils` 仍是别的后端的。这样它能在 MC/web 已发布工具的进程里继续出窗口。
+
+**发布出去的必须就是根用的那个实例。** standalone 在 `launch` 前先建 `WindowUtils` 并发布，入口随后复用它（`startWindow` 优先取 `dslUtils as? WindowUtils`），否则 `dslUtils` 会指向一个永远拿不到 `frame` 的副本，`capture`/`quit` 之类就会答非所问。
 输入转发同理：**每个事件都要送到本窗口渲染的那个根**，不能去读任何全局根——共存进程里那会把光标与键盘派给别人的树，而且完全静默（一个对不上焦点的根本来就看起来像处理过了）。根由本仓自己构造，所以输入持有它、窗口持有它、页面持有它，**处处接参数**。
 
 配对是**单向**的：这一份的元数据声明依赖无界面后端，反向则不是——无界面后端只在运行期用加载器的 mod 列表判断，不在元数据里引用这一份。这样无界面后端单独装也是完整可用的。
 
-发布时机在**启动阶段**：入口只在 `DslRuntime.launch()` 里被调用（游戏里由无界面后端触发，standalone 由 `Standalone.main` 触发），而这个阶段内部要求平台已发布，所以顺序恒为 `install` → `start` → `launch`。本仓没有 loader 入口类，因而也不存在"构造期发布"这个问题。
+发布时机在**启动阶段**：入口只在 `DslRuntime.launch()` 里被调用（游戏里由无界面后端触发，standalone 由 `Standalone.main` 触发），而这个阶段内部要求进程级工具已发布，所以顺序恒为 `install` → `start` → `launch`。本仓没有 loader 入口类，因而也不存在"构造期发布"这个问题。
 
 ## AWT 的 headless 在入口对象初始化时清掉
 
@@ -55,6 +57,12 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 按 `assets/<命名空间>/textures/item/<名字>.png` 找，找不到再试 `textures/block/`。候选来源依次是版本客户端 jar（`versions/<版本>/<版本>.jar`）与 `mods/` 下的每个 jar，独立运行时退回 classpath；都没有就用一块平面替身加首字母，而不是画一个看起来不对的图标。
 
 这一条是"不读 Minecraft 代码、只读 jar 里的 PNG"的边界：它读的只是资源文件，不涉及任何 Minecraft 类型。
+
+## 图片按来源分派
+
+`ImageHolder` 不再带 id：`source` 是 `ImageSource`，即 `Resource`（命名空间位置）/ `LocalFile`（本机文件）/ `Remote`（url）。渲染器与贴图缓存都 `when(source)` 按类型分派，缓存以 source 为键——一个资源位置永远不会被当成文件路径来读。
+
+`localImage` 沿用现状同步读文件取尺寸（帧线程阻塞的问题另案处理）；`remoteImage` 在本后端返回 `ImageHolder.empty`，因为这里没有 http 栈，下载也不该发生在帧线程。`reloadLocalImage` / `reloadRemoteImage` 同时丢弃 holder 缓存与已解码贴图：只丢一个，下一次读到的仍会是旧像素。
 
 ## 刻意不做
 

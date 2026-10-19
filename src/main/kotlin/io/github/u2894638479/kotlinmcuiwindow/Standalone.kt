@@ -14,7 +14,7 @@ import java.awt.GraphicsEnvironment
  * process to do it - inside a game this file is never reached, and `install` is that backend's job
  * there.
  *
- * It publishes the platform and then triggers the framework's launch stage, which is what opens the\n * window (the entry's `launch`); the window is the same one an in-game session opens, with the\n * framework's entry list at
+ * It publishes the process-level helpers and then triggers the framework's launch stage, which is what opens the\n * window (the entry's `launch`); the window is the same one an in-game session opens, with the\n * framework's entry list at
  * the bottom of its stack: that page is the framework's own, and it is what a person expects to see
  * when this backend is started on its own.
  *
@@ -31,23 +31,25 @@ fun main(args: Array<String>) {
     val preview = System.getProperty(PREVIEW_PROPERTY)?.takeIf { it.isNotBlank() }
 
     DslRuntime.install { WindowMetadata }
-    // The result of publishing is deliberately not checked. This process has exactly one platform,
-    // and the `install` above would have thrown had another one installed the framework first, so
-    // `start` cannot be refused. Testing it here would read as if a game's own client platform could
-    // take the window away from the standalone run, which cannot happen.
+    // The helpers are built here because this process has no headless backend to do it, and the
+    // same instance is published: the entry reuses it when it builds the root, so `dslUtils` and the
+    // window answer from the one object whose frame gets wired. The result is deliberately not
+    // checked - `install` above would have thrown had another backend installed the framework first,
+    // so `start` cannot be refused in this process.
     //
-    // The platform is published before the launch stage because that stage refuses to run without
-    // one; the window itself is opened by the entry, so nothing here may open it a second time.
-    DslRuntime.start { WindowPlatform(WindowUtils()) }
+    // The utils are published before the launch stage because that stage refuses to run without
+    // them; the window itself is opened by the entry, so nothing here may open it a second time.
+    val utils = WindowUtils()
+    DslRuntime.start { utils }
     DslRuntime.launch()
     val session = checkNotNull(windowSession) { "the window entry did not open a window" }
     dslLogger.info("standalone: window shown with the entry list at the bottom of its stack")
 
     // A preview session photographs and quits on its own; this path is for a plain standalone run.
-    if (captureName != null && preview == null) captureAndExit(session.platform, session.utils, captureName)
+    if (captureName != null && preview == null) captureAndExit(session.utils, captureName)
 }
 
-private fun captureAndExit(platform: WindowPlatform, utils: WindowUtils, fileName: String) {
+private fun captureAndExit(utils: WindowUtils, fileName: String) {
     val delay = System.getProperty(CAPTURE_DELAY_PROPERTY)?.toLongOrNull() ?: DEFAULT_CAPTURE_DELAY_MILLIS
     // A daemon thread: the window's own event dispatch thread is what keeps the process alive, and
     // this one only has to wait for the page to have painted before photographing it.
@@ -56,11 +58,11 @@ private fun captureAndExit(platform: WindowPlatform, utils: WindowUtils, fileNam
         val file = runBlocking { utils.capture(fileName) }
         if (file == null) {
             dslLogger.error("standalone: no screenshot was written for '$fileName'")
-            platform.utils.quit(1)
+            utils.quit(1)
             return@Thread
         }
         dslLogger.info("standalone: wrote ${file.absolutePath}")
-        platform.utils.quit(0)
+        utils.quit(0)
     }.apply {
         isDaemon = true
         name = "kotlinmcuiwindow-capture"

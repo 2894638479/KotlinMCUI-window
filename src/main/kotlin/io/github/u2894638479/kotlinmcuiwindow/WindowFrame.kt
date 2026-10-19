@@ -1,6 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.dsl.DslFunction
+import io.github.u2894638479.kotlinmcui.backend.DslPlatformUtils
 import io.github.u2894638479.kotlinmcui.backend.DslScreenHolder
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
@@ -92,14 +93,14 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
      * stack, which is the whole of "show a screen" here.
      */
     internal fun create(
-        platform: WindowPlatform,
+        utils: DslPlatformUtils,
         title: String,
         dslFunction: DslFunction,
         width: Int = DEFAULT_WIDTH,
         height: Int = DEFAULT_HEIGHT,
     ): DslScreenHolder<WindowScreen> {
         val root = checkNotNull(root) { "a page was created before this window was given its root" }
-        val page = WindowScreen(platform, root, this, width, height, title, dslFunction)
+        val page = WindowScreen(utils, root, this, width, height, title, dslFunction)
         return object : DslScreenHolder<WindowScreen> {
             override val screen = page
             override fun show() = push(page)

@@ -78,6 +78,6 @@ class WindowIsolationTest {
     fun `a local image is cached for the process rather than per window`() {
         val absent = File(System.getProperty("java.io.tmpdir"), "kotlinmcuiwindow-not-here.png")
         absent.delete()
-        assertSame(WindowUtils().loadLocalImage(absent), WindowUtils().loadLocalImage(absent))
+        assertSame(WindowUtils().localImage(absent), WindowUtils().localImage(absent))
     }
 }
