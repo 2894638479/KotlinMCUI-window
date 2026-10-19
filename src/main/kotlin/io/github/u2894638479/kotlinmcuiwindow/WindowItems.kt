@@ -19,25 +19,34 @@ import kotlin.streams.asSequence
  * standalone run - nothing is found and the caller keeps its own stand-in.
  *
  * Icons are decoded once and kept, and a miss is remembered, so a page drawing the same item every
- * frame does not touch the disk again.
+ * frame does not touch the disk again. The decode happens on [WindowImages]' background thread for
+ * the same reason a local image does: `renderItem` runs on the frame thread, which must not read.
+ * The first ask for an item therefore answers `null` and that frame draws the stand-in.
  */
 internal object WindowItems {
     private val loaded = HashMap<String, BufferedImage>()
     private val failed = HashSet<String>()
+
+    /** Items whose read is on the background thread, so it is scheduled only once. */
+    private val loading = HashSet<String>()
+
+    /** Written on the session thread, and read by the background read when it resolves the jars. */
+    @Volatile
     private var jars: List<ZipFile>? = null
 
-    /** The icon for [item] (`namespace:path`), or `null` when neither the game nor the jar has one. */
+    /** The icon for [item] (`namespace:path`), or `null` when it is not decoded yet or has none. */
     fun get(item: String): BufferedImage? {
         if (item.isEmpty()) return null
         loaded[item]?.let { return it }
-        if (failed.contains(item)) return null
-        val image = decode(item, gameJars())
-        if (image == null) {
-            failed += item
-            return null
-        }
-        loaded[item] = image
-        return image
+        if (failed.contains(item) || !loading.add(item)) return null
+        WindowImages.loadLater(
+            read = { decode(item, gameJars()) },
+            published = { image ->
+                loading.remove(item)
+                if (image == null) failed += item else loaded[item] = image
+            },
+        )
+        return null
     }
 
     /**

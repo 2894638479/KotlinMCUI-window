@@ -8,9 +8,12 @@ import javax.imageio.ImageIO
 /**
  * The backend's texture store: a decoded [BufferedImage] per [ImageSource].
  *
- * A desktop backend has no GPU upload step, so there is nothing to keep off the calling thread and
- * nothing to release: a source is decoded once, kept, and handed straight to Java2D. Sources that do
- * not decode are remembered as failures so a missing file does not hit the disk once per frame.
+ * A desktop backend has no GPU upload step, so there is nothing to release: a decoded source is kept
+ * and handed straight to Java2D. What this store must not do is read on the thread that paints. A
+ * local file's pixels are decoded by [WindowImages] before [get] can see them, and a resource is
+ * decoded on the same background thread; [get] itself only answers with what is already decoded, or
+ * starts the read and answers `null` for this frame. Sources that do not decode are remembered as
+ * failures so a missing file does not hit the disk once per frame.
  *
  * The three sources are dispatched by type, not parsed out of one string: a [ImageSource.Resource] is
  * a classpath location written the way the game writes one - `kotlinmcui:icon.png` is the core jar's
@@ -24,37 +27,60 @@ import javax.imageio.ImageIO
  */
 internal object WindowTextures {
     private val loaded = HashMap<ImageSource, BufferedImage>()
+
+    /** Sources whose read finished without pixels; kept so they are not read again every frame. */
     private val failed = HashSet<ImageSource>()
 
-    /** The image for [image], or `null` when it has no source or cannot be decoded. */
+    /** Sources whose read is on the background thread, so it is scheduled only once. */
+    private val loading = HashSet<ImageSource>()
+
+    /**
+     * The image for [image], or `null` when it has no source or is not decoded yet.
+     *
+     * On the frame thread this is an upload and nothing more: a local file's pixels were decoded
+     * when `localImage` was asked for it, and a resource read is started here but finishes off this
+     * thread. The next frame that asks again draws it.
+     */
     fun get(image: ImageHolder): BufferedImage? {
         val source = image.source ?: return null
-        loaded[source]?.let { return it }
-        if (failed.contains(source)) return null
-        val texture = decode(source)
-        if (texture == null) {
-            failed += source
-            return null
+        return when (source) {
+            is ImageSource.LocalFile -> WindowImages.pixels(source.file)
+            is ImageSource.Resource -> resource(source)
+            is ImageSource.Remote -> null
         }
-        loaded[source] = texture
-        return texture
     }
 
     /**
-     * Drop what is remembered about [source], so the next [get] reads it again.
+     * Drop what is remembered about [source], so the next ask reads it again.
      *
-     * A failure is dropped too: "reload" is the caller saying the file or url changed, which is the
-     * one case where a remembered failure would be stale rather than a saving.
+     * A local file has one entry in [WindowImages] holding both the holder and the pixels; dropping
+     * that entry is what makes the next `localImage` read the file. Failures are dropped too:
+     * "reload" is the caller saying the file or url changed, which is the one case where a
+     * remembered failure would be stale rather than a saving.
      */
     fun forget(source: ImageSource) {
-        loaded.remove(source)
-        failed.remove(source)
+        when (source) {
+            is ImageSource.LocalFile -> WindowImages.forget(source.file)
+            is ImageSource.Resource, is ImageSource.Remote -> {
+                loaded.remove(source)
+                failed.remove(source)
+                loading.remove(source)
+            }
+        }
     }
 
-    private fun decode(source: ImageSource): BufferedImage? = when (source) {
-        is ImageSource.Resource -> decodeResource(source.location)
-        is ImageSource.LocalFile -> runCatching { ImageIO.read(source.file) }.getOrNull()
-        is ImageSource.Remote -> null
+    /** A classpath resource, decoded off the frame thread; the first ask only schedules the read. */
+    private fun resource(source: ImageSource.Resource): BufferedImage? {
+        loaded[source]?.let { return it }
+        if (failed.contains(source) || !loading.add(source)) return null
+        WindowImages.loadLater(
+            read = { decodeResource(source.location) },
+            published = { texture ->
+                loading.remove(source)
+                if (texture == null) failed += source else loaded[source] = texture
+            },
+        )
+        return null
     }
 
     private fun decodeResource(location: String): BufferedImage? = runCatching {

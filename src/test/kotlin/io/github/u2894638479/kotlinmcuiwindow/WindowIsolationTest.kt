@@ -2,7 +2,10 @@ package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.input.Key
 import java.awt.event.KeyEvent
+import java.awt.image.BufferedImage
 import java.io.File
+import java.util.concurrent.Executor
+import javax.imageio.ImageIO
 import javax.swing.JPanel
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -76,8 +79,18 @@ class WindowIsolationTest {
 
     @Test
     fun `a local image is cached for the process rather than per window`() {
-        val absent = File(System.getProperty("java.io.tmpdir"), "kotlinmcuiwindow-not-here.png")
-        absent.delete()
-        assertSame(WindowUtils().localImage(absent), WindowUtils().localImage(absent))
+        val file = File(System.getProperty("java.io.tmpdir"), "kotlinmcuiwindow-isolation.png")
+        file.deleteOnExit()
+        ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB), "png", file)
+        WindowImages.executor = Executor { it.run() }
+        WindowImages.publish = { it() }
+        try {
+            WindowUtils().localImage(file) // the first ask starts the read
+            val holder = WindowUtils().localImage(file) // the inline read has finished
+            assertFalse(holder.isEmpty)
+            assertSame(holder, WindowUtils().localImage(file), "the next window must not decode a copy")
+        } finally {
+            WindowImages.reset()
+        }
     }
 }

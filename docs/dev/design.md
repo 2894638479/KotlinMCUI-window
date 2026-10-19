@@ -62,7 +62,9 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 `ImageHolder` 不再带 id：`source` 是 `ImageSource`，即 `Resource`（命名空间位置）/ `LocalFile`（本机文件）/ `Remote`（url）。渲染器与贴图缓存都 `when(source)` 按类型分派，缓存以 source 为键——一个资源位置永远不会被当成文件路径来读。
 
-`localImage` 沿用现状同步读文件取尺寸（帧线程阻塞的问题另案处理）；`remoteImage` 在本后端返回 `ImageHolder.empty`，因为这里没有 http 栈，下载也不该发生在帧线程。`reloadLocalImage` / `reloadRemoteImage` 同时丢弃 holder 缓存与已解码贴图：只丢一个，下一次读到的仍会是旧像素。
+`localImage` 不在帧线程上读盘：第一次问一个文件只登记"加载中"并返回 `empty`，读盘与解码在自建的单线程守护线程上，完成后发布回会话线程（Swing 即 EDT）；下一帧命中条目直接拿到带尺寸的 holder。一个 `File` 条目同时存 `lastUsed`、holder 与已解码像素；`WindowTextures.get` 只上传已经解码好的像素，缓存里没有就返回 `null`，绝不 `ImageIO.read`。`remoteImage` 在本后端返回 `ImageHolder.empty`，因为这里没有 http 栈，下载也不该发生在帧线程。
+
+条目在每帧入口做一次 sweep：超过 `TTL_MILLIS`（60 秒）没用过的条目连同像素一起淘汰，离开页面的图片不会一直占着内存。`reloadLocalImage` / `reloadRemoteImage` 丢弃对应条目：holder 与像素在同一个条目里，所以清一次就是两半都清，下一次 `localImage` 重新读文件。只有会话线程改缓存，后台线程只把结果交回 EDT，因此不需要并发容器。
 
 ## 刻意不做
 
@@ -73,7 +75,7 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 ## 每帧循环由后端自己写
 
-核心不再替后端驱动帧。一帧就是三步，按这个顺序：
+核心不再替后端驱动帧。每帧入口先做一次图片缓存 `sweep()`（见上一节），然后一帧就是三步，按这个顺序：
 
 1. 把表面尺寸写给根与渲染器：`root.rect`（渲染 pass 会把它拷到每个已挂载的屏）与渲染器的 surface 尺寸（scale 由此派生）；
 2. `context(renderer, renderParam, input.mouse) { root.component.render() }`——渲染器作为 context 实参传进去，不要让别的角色去"冒充"渲染器；

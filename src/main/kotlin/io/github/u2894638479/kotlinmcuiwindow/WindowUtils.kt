@@ -5,7 +5,6 @@ import io.github.u2894638479.kotlinmcui.backend.DslRootUtils
 import io.github.u2894638479.kotlinmcui.image.ImageHolder
 import io.github.u2894638479.kotlinmcui.image.ImageSource
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
-import io.github.u2894638479.kotlinmcui.math.px
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import java.awt.Desktop
@@ -55,7 +54,12 @@ internal class WindowUtils : DslPlatformUtils, DslRootUtils {
 
     override val isInWorld: Boolean get() = false
 
-    override fun localImage(file: File): ImageHolder = WindowCaches.holders.getOrPut(file) { holderFor(file) }
+    /**
+     * A local image is decoded off the frame thread: the first call for a file starts the read and
+     * answers [ImageHolder.empty], and a later frame gets the holder with the file's size. Nothing
+     * here waits for the disk, because the platform contract runs this while a frame is being built.
+     */
+    override fun localImage(file: File): ImageHolder = WindowImages.holder(file)
 
     /**
      * There is no http stack behind this backend, so a url has no pixels: the holder is the empty
@@ -65,9 +69,8 @@ internal class WindowUtils : DslPlatformUtils, DslRootUtils {
     override fun remoteImage(url: String): ImageHolder = ImageHolder.empty
 
     override fun reloadLocalImage(file: File) {
-        // Two caches answer for one file: the holder this backend hands out, and the decoded pixels
-        // the renderer keeps. Dropping only one would leave the next read reporting the old size.
-        WindowCaches.holders.remove(file)
+        // The holder and the decoded pixels live in one image entry, so dropping it is what makes
+        // the next localImage read the file again - there is no second texture copy to clear.
         WindowTextures.forget(ImageSource.LocalFile(file))
     }
 
@@ -100,18 +103,6 @@ internal class WindowUtils : DslPlatformUtils, DslRootUtils {
         // reference - so the process is ended directly. `quit` is only ever reached from a preview
         // session, whose whole purpose is to run unattended and exit.
         exitProcess(exitCode)
-    }
-
-
-    /**
-     * A local image needs no upload step here, so it is read on the spot and the framework gets a
-     * usable holder straight away instead of an empty one that fills in later. The file is small
-     * enough that reading it on the event dispatch thread is not worth a second thread.
-     */
-    private fun holderFor(file: File): ImageHolder {
-        if (!file.isFile) return ImageHolder.empty
-        val size = runCatching { ImageIO.read(file) }.getOrNull() ?: return ImageHolder.empty
-        return ImageHolder(ImageSource.LocalFile(file), size.width.px, size.height.px)
     }
 
     /**

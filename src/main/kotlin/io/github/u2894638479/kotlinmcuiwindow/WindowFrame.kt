@@ -235,6 +235,9 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
      * would surface as a "page threw while rendering" line, which would be a false alarm.
      */
     internal fun paintFrame(graphics: Graphics2D, width: Int, height: Int): Boolean {
+        // One image-cache sweep per frame, at the entry: entries age by wall clock, and a frame is
+        // the tick the session thread already runs on.
+        WindowImages.sweep()
         val root = root ?: return false
         if (root.isClosed) return false
         // The surface size goes to both the root's viewport and the renderer's scale, then the tree
