@@ -82,6 +82,7 @@ class WindowIsolationTest {
         val file = File(System.getProperty("java.io.tmpdir"), "kotlinmcuiwindow-isolation.png")
         file.deleteOnExit()
         ImageIO.write(BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB), "png", file)
+        WindowImages.reset()
         WindowImages.executor = Executor { it.run() }
         WindowImages.publish = { it() }
         try {

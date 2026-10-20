@@ -30,6 +30,7 @@ class WindowItemsTest {
 
     @BeforeTest
     fun inlineLoads() {
+        WindowImages.reset()
         WindowImages.executor = Executor { it.run() }
         WindowImages.publish = { it() }
     }

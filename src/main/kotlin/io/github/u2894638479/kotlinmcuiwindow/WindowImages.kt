@@ -7,8 +7,12 @@ import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantLock
 import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
+import kotlin.concurrent.withLock
 
 /**
  * The local images this process has decoded, one entry per file, read off the session thread.
@@ -31,6 +35,9 @@ internal object WindowImages {
     /** How long an entry may go unused before [sweep] drops it: a minute, at 60 frames a second. */
     internal const val TTL_MILLIS = 60_000L
 
+    /** How long [reset] gives the reads in flight before it calls the wait off and fails. */
+    private const val SETTLE_TIMEOUT_MILLIS = 10_000L
+
     internal class Entry(val file: File) {
         /** When this entry was last asked for, measured by [clock]. */
         var lastUsed: Long = 0L
@@ -49,6 +56,15 @@ internal object WindowImages {
     }
 
     private val entries = HashMap<File, Entry>()
+
+    /** Reads whose task has not returned yet, so [reset] knows whether any read is still running. */
+    private val inFlight = AtomicInteger()
+
+    /** Guards the wait in [awaitReads]; a finishing read signals it. */
+    private val readsSettled = ReentrantLock()
+
+    /** Signalled under [readsSettled] whenever a read returns. */
+    private val noReads = readsSettled.newCondition()
 
     /** Wall clock in milliseconds; tests replace it to age entries without sleeping. */
     internal var clock: () -> Long = WALL_CLOCK
@@ -130,29 +146,75 @@ internal object WindowImages {
     /**
      * Run [read] off the session thread, then hand its result back through [publish].
      *
+     * The wiring is taken now rather than when the read finishes: a read belongs to whatever asked
+     * for it, and the queue or thread it reports to cannot change under it. Only tests replace any
+     * of this, and a read that outlived the case that scheduled it must not be adopted by the next
+     * one - it would answer into a queue it has nothing to do with.
+     *
      * The renderer's resource textures use this same route: a texture is either decoded already or
      * on its way, never read on the thread that paints.
      */
     fun loadLater(read: () -> BufferedImage?, published: (BufferedImage?) -> Unit) {
-        executor.execute {
-            // A throwing read is a source that could not be decoded, not a broken frame.
-            val image = runCatching(read).getOrNull()
-            publish { published(image) }
+        val deliver = publish
+        inFlight.incrementAndGet()
+        try {
+            executor.execute {
+                try {
+                    // A throwing read is a source that could not be decoded, not a broken frame.
+                    val image = runCatching(read).getOrNull()
+                    deliver { published(image) }
+                } finally {
+                    readFinished()
+                }
+            }
+        } catch (t: Throwable) {
+            readFinished()
+            throw t
         }
     }
 
-    /** Restore the production wiring and empty the cache; tests start each case from a known state. */
+    /**
+     * Restore the production wiring and empty the cache; tests start each case from a known state.
+     *
+     * A read that was already scheduled cannot be cancelled - the executor has no handle for that -
+     * so this waits for it to finish before returning. A reset that returned while the previous
+     * case's read was still running would leave that read in the middle of the next case, and a
+     * test that is supposed to own its executor and publication would be sharing them.
+     */
     internal fun reset() {
         entries.clear()
         clock = WALL_CLOCK
         executor = DEFAULT_EXECUTOR
         publish = EDT_PUBLISH
         decode = IMAGE_IO_DECODE
+        awaitReads()
+    }
+
+    /** Wait until no read is running, or fail loudly: a read that never settles breaks the reset. */
+    private fun awaitReads() {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(SETTLE_TIMEOUT_MILLIS)
+        readsSettled.withLock {
+            while (true) {
+                if (inFlight.get() == 0) return
+                val remaining = deadline - System.nanoTime()
+                check(remaining > 0L) {
+                    "a local image read was still running ${SETTLE_TIMEOUT_MILLIS}ms after the cache was reset"
+                }
+                noReads.awaitNanos(remaining)
+            }
+        }
+    }
+
+    private fun readFinished() {
+        inFlight.decrementAndGet()
+        readsSettled.withLock { noReads.signalAll() }
     }
 
     private fun read(entry: Entry) {
         entry.loading = true
         entry.failed = false
+        // The decoder the entry was scheduled under; a later replacement is another reader's.
+        val decode = decode
         loadLater(
             read = { decode(entry.file) },
             published = { image ->
