@@ -252,7 +252,6 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
         }
         val param = WindowRenderParam(graphics, width, height)
         context(renderer, param, input.mouse) { root.component.render() }
-        context(param) { renderer.flush() }
         return true
     }
 

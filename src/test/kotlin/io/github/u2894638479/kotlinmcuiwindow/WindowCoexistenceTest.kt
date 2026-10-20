@@ -67,7 +67,7 @@ class WindowCoexistenceTest {
         return Built(utils, root, renderer, input, window)
     }
 
-    /** Drive one frame the way the window's panel does: size, viewport, render, flush. */
+    /** Drive one frame the way the window's panel does: size, viewport, render. */
     private fun renderOneFrame(built: Built, width: Int, height: Int) {
         val surface = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
         val graphics = surface.createGraphics()
@@ -82,7 +82,6 @@ class WindowCoexistenceTest {
             }
             val param = WindowRenderParam(graphics, width, height)
             context(built.renderer, param, built.input.mouse) { built.root.component.render() }
-            context(param) { built.renderer.flush() }
         } finally {
             graphics.dispose()
         }

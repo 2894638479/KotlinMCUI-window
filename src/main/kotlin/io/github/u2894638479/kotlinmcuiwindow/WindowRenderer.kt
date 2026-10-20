@@ -57,12 +57,6 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
     /** The scale that makes a page's `.scaled` sizes come out at the current window's proportions. */
     override val guiScale: Double get() = guiScaleFor(surfaceWidth, surfaceHeight)
 
-    context(renderParam: WindowRenderParam)
-    override fun flush() {
-        // Every draw call paints immediately, so there is no batch to commit. The method stays
-        // because the framework calls it at every scissor and transform boundary, and a backend that
-        // does batch has to be able to say "and now" there.
-    }
 
     context(renderParam: WindowRenderParam)
     override fun renderQuad(
