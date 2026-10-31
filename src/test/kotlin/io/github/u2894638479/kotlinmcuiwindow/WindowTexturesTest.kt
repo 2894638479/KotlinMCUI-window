@@ -5,7 +5,9 @@ import io.github.u2894638479.kotlinmcui.image.ImageSource
 import io.github.u2894638479.kotlinmcui.math.px
 import java.awt.image.BufferedImage
 import java.io.File
+import java.lang.management.ManagementFactory
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.ImageIO
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -16,6 +18,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /**
  * How an image source turns into pixels, and what happens when it does not.
@@ -33,16 +36,26 @@ import kotlin.test.assertSame
  * nothing here depends on a game installation.
  */
 class WindowTexturesTest {
+    private val probe = ImageSource.Resource("kotlinmcuiwindow:probe.png")
+    private val absent = ImageSource.Resource("kotlinmcuiwindow:no-such-texture.png")
+    private val malformed = ImageSource.Resource("kotlinmcuiwindow:")
+
     @BeforeTest
     fun startFromProductionWiring() {
         WindowImages.reset()
         // The background read and its publication run inline, so "the next ask" is deterministic.
         WindowImages.executor = Executor { it.run() }
         WindowImages.publish = { it() }
+        WindowTextures.forget(probe)
+        WindowTextures.forget(absent)
+        WindowTextures.forget(malformed)
     }
 
     @AfterTest
     fun restoreProductionWiring() {
+        WindowTextures.forget(probe)
+        WindowTextures.forget(absent)
+        WindowTextures.forget(malformed)
         WindowImages.reset()
     }
 
@@ -160,5 +173,101 @@ class WindowTexturesTest {
     @Test
     fun `the empty sentinel has no image`() {
         assertNull(WindowTextures.get(ImageHolder.empty))
+    }
+
+    @Test
+    fun `a pending resource becomes ready, and only then has an image`() {
+        val image = holder(probe, 4, 4)
+        assertNull(WindowTextures.ready(image), "the first ask only schedules")
+        assertFalse(WindowTextures.isMissing(image), "a read in flight is not a failure")
+        val ready = WindowTextures.ready(image)
+        assertNotNull(ready, "the inline read should have published pixels")
+        assertEquals(4, ready.width)
+        assertFalse(WindowTextures.isMissing(image), "ready pixels are not a failure")
+    }
+
+    @Test
+    fun `a resource that is nowhere is pending first and missing after the failed read`() {
+        // A queued read, not an inline one: the point of the case is the frame that only scheduled
+        // the read, which must still be pending rather than already failed.
+        val queued = ArrayDeque<Runnable>()
+        WindowImages.executor = Executor { queued.addLast(it) }
+        val image = holder(absent)
+        assertFalse(WindowTextures.isMissing(image), "nothing has been read yet")
+        assertNull(WindowTextures.ready(image), "the first ask only schedules")
+        assertFalse(WindowTextures.isMissing(image), "a read in flight is not a failure")
+        queued.removeFirst().run()
+        assertTrue(WindowTextures.isMissing(image))
+        assertTrue(WindowTextures.isMissing(image), "the failure is remembered")
+    }
+
+    @Test
+    fun `a malformed identifier is missing immediately and starts no read`() {
+        val reads = AtomicInteger()
+        WindowImages.executor = Executor { reads.incrementAndGet(); it.run() }
+        assertTrue(WindowTextures.isMissing(holder(malformed)))
+        assertNull(WindowTextures.ready(holder(malformed)))
+        assertEquals(0, reads.get(), "nothing shaped like a location is worth an io attempt")
+    }
+
+    @Test
+    fun `an unsupported source is missing, and an empty holder is pending`() {
+        val remote = holder(ImageSource.Remote("https://example.invalid/icon.png"))
+        assertTrue(WindowTextures.isMissing(remote))
+        assertNull(WindowTextures.ready(remote))
+        assertFalse(WindowTextures.isMissing(ImageHolder.empty))
+        assertNull(WindowTextures.ready(ImageHolder.empty))
+    }
+
+    @Test
+    fun `a local file nobody asked for is pending, and a failed read is missing`() {
+        val file = File(System.getProperty("java.io.tmpdir"), "kotlinmcuiwindow-never-read.png")
+        file.delete()
+        val source = ImageSource.LocalFile(file)
+        val image = holder(source)
+        assertNull(WindowTextures.ready(image), "the renderer must not decode")
+        assertFalse(WindowTextures.isMissing(image), "an unasked file is pending, not failed")
+
+        WindowImages.holder(file) // this is what starts the read; it fails inline
+        assertTrue(WindowTextures.isMissing(holder(source)))
+    }
+
+    /**
+     * A warm resolve is the frame-thread path for every visible texture, so it must not build the
+     * `WindowTexture.Ready`/`WindowTextureSample` objects the first version made per hit/draw. The
+     * identity assertion proves the cached image is returned as-is; the allocation measurement
+     * proves the repeated call itself creates nothing.
+     */
+    @Test
+    fun `a warm resolve reuses the cached image without building a wrapper`() {
+        val image = holder(probe, 4, 4)
+        assertNull(WindowTextures.ready(image), "the first ask only schedules")
+        val cached = WindowTextures.ready(image)
+        assertNotNull(cached)
+        assertSame(cached, WindowTextures.ready(image), "a warm resolve returns the cached BufferedImage itself")
+
+        val bean = ManagementFactory.getThreadMXBean()
+        val allocation = bean as? com.sun.management.ThreadMXBean
+        assertNotNull(allocation, "the build's JDK must expose per-thread allocation counters")
+        assertTrue(allocation.isThreadAllocatedMemorySupported, "per-thread allocation counters are supported")
+        if (!allocation.isThreadAllocatedMemoryEnabled) {
+            runCatching { allocation.isThreadAllocatedMemoryEnabled = true }
+        }
+        assertTrue(allocation.isThreadAllocatedMemoryEnabled, "per-thread allocation counters are enabled")
+        val thread = Thread.currentThread().id
+        repeat(2_000) { WindowTextures.ready(image) }
+        val before = allocation.getThreadAllocatedBytes(thread)
+        var sampled: BufferedImage? = null
+        var index = 0
+        while (index < 20_000) {
+            sampled = WindowTextures.ready(image)
+            index++
+        }
+        val after = allocation.getThreadAllocatedBytes(thread)
+        assertSame(cached, sampled)
+        assertTrue(
+            after - before < 300_000L,
+            "20k warm resolutions allocated ${after - before} bytes; a per-hit wrapper would allocate more",
+        )
     }
 }

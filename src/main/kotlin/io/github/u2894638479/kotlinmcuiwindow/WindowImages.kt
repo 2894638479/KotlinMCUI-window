@@ -122,6 +122,19 @@ internal object WindowImages {
         return entry.pixels
     }
 
+    /**
+     * Whether [file]'s read has already finished without pixels.
+     *
+     * Distinguishes a confirmed failure from a read that is still on its way: both answer `null` to
+     * [pixels], but only the first is a reason to draw the missing texture. An entry nobody asked
+     * for is not a failure yet - the renderer must not decode it to find out.
+     */
+    fun failed(file: File): Boolean {
+        val entry = entries[file] ?: return false
+        entry.lastUsed = clock()
+        return entry.failed
+    }
+
     /** Forget [file] entirely: the next [holder] reads it again. */
     fun forget(file: File) {
         entries.remove(file)

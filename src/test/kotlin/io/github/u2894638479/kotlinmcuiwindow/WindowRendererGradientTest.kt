@@ -1,6 +1,8 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.math.Color
+import io.github.u2894638479.kotlinmcui.math.ColorArray
+import io.github.u2894638479.kotlinmcui.math.MeasureArray
 import io.github.u2894638479.kotlinmcui.math.px
 import io.github.u2894638479.kotlinmcui.math.rect.Rect
 import java.awt.Graphics2D
@@ -39,7 +41,7 @@ class WindowRendererGradientTest {
         val hue = Color(255,122,0)
         val black = Color(0,0,0)
         context(WindowRenderParam(graphics)) {
-            renderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black,null,null)
+            renderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black)
         }
         graphics.dispose()
 
@@ -60,18 +62,22 @@ class WindowRendererGradientTest {
     fun `a triangle interpolates between its vertex colours`() {
         val (image, graphics) = surface()
         // Apex red, bottom left green, bottom right blue.
-        val vertices = floatArrayOf(
+        val vertices = MeasureArray(6)
+        val colors = ColorArray(3) { index ->
+            when (index) {
+                0 -> Color(255, 0, 0)
+                1 -> Color(0, 255, 0)
+                else -> Color(0, 0, 255)
+            }
+        }
+        val triangle = floatArrayOf(
             (size / 2).toFloat(), 0f,
             0f, size.toFloat(),
             size.toFloat(), size.toFloat(),
         )
-        val colors = intArrayOf(
-            Color(255,0,0).rgbaInt,
-            Color(0,255,0).rgbaInt,
-            Color(0,0,255).rgbaInt,
-        )
+        for (index in triangle.indices) vertices[index] = triangle[index].px
         context(WindowRenderParam(graphics)) {
-            renderer.renderTriangles(vertices,colors,null)
+            renderer.renderTriangles(vertices, colors)
         }
         graphics.dispose()
 
@@ -93,7 +99,7 @@ class WindowRendererGradientTest {
         val hue = Color(255,122,0)
         val black = Color(0,0,0)
         context(WindowRenderParam(graphics)) {
-            renderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black,null,null)
+            renderer.renderQuad(Rect(0.px,0.px,size.px,size.px),white,hue,black,black)
         }
         graphics.dispose()
 
