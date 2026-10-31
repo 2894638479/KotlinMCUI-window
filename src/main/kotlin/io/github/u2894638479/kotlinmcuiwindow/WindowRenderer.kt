@@ -21,6 +21,7 @@ import java.awt.Paint
 import java.awt.RenderingHints
 import java.awt.Shape
 import java.awt.geom.AffineTransform
+import java.awt.geom.Area
 import java.awt.geom.Path2D
 import java.awt.geom.Rectangle2D
 import java.awt.image.BufferedImage
@@ -817,24 +818,32 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
 
     context(renderParam: WindowRenderParam)
     override fun withScissor(rect: Rect, block: () -> Unit) {
-        val bounds = rect.bounds()
-        if (bounds == null) {
-            block()
-            return
-        }
-        val (l, t, r, b) = bounds
         val graphics = renderParam.graphics
         val savedClip = graphics.clip
         val savedRect = renderParam.clip
-        // `Graphics2D.clip(Shape)` intersects with the clip already in effect, so nesting works by
-        // itself; restoring the saved Shape is what puts it back.
-        graphics.clip(Rectangle2D.Float(l, t, r - l, b - t))
-        renderParam.clip = rect
+        val savedOutput = renderParam.outputClip
         try {
+            // Snapshot every edge before the block: a caller's Rect may be backed by mutable state,
+            // and the scope must not read it again after entry. Snapshotting also keeps a finite
+            // positive extent from changing while the block runs.
+            val bounds = rect.scissorBounds()
+            val active = bounds?.let { effectiveClip(graphics, it) }
+            // The actual clip is the native one; this field only records a valid rectangular request.
+            renderParam.clip = bounds?.let { Rect(it[0].px, it[1].px, it[2].px, it[3].px) }
+            renderParam.outputClip = active ?: Area()
+            if (active == null) {
+                // Invalid geometry, a singular local-to-output matrix, an eye-plane crossing or an
+                // empty intersection all fail closed. The block still runs exactly once, under an
+                // empty native clip, so its side effects and control flow are not silently dropped.
+                graphics.clip = Path2D.Double()
+            } else {
+                setNativeClip(graphics, active)
+            }
             block()
         } finally {
             graphics.setClip(savedClip)
             renderParam.clip = savedRect
+            renderParam.outputClip = savedOutput
         }
     }
 
@@ -869,19 +878,115 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
             return
         }
         val graphics = renderParam.graphics
-        val saved = graphics.transform
-        graphics.transform(
-            AffineTransform(
-                transform.m00.toDouble(), transform.m10.toDouble(),
-                transform.m01.toDouble(), transform.m11.toDouble(),
-                transform.m02.toDouble(), transform.m12.toDouble(),
-            )
-        )
+        val savedTransform = graphics.transform
+        // Reinstall the frozen output region through the new inverse: setClip accepts user-space
+        // geometry under the current affine. No scissor means no clip work at all.
+        val frozenClip = renderParam.outputClip
+        val savedClip = if (frozenClip != null) graphics.clip else null
         try {
+            graphics.transform(
+                AffineTransform(
+                    transform.m00.toDouble(), transform.m10.toDouble(),
+                    transform.m01.toDouble(), transform.m11.toDouble(),
+                    transform.m02.toDouble(), transform.m12.toDouble(),
+                )
+            )
+            if (frozenClip != null) setNativeClip(graphics, frozenClip)
             block()
         } finally {
-            graphics.transform = saved
+            graphics.transform = savedTransform
+            if (frozenClip != null) graphics.setClip(savedClip)
         }
+    }
+
+    /**
+     * A scissor's four edges, each read exactly once before the block and before any validation.
+     *
+     * Reading once is what makes a mutable/borrowed `Rect` harmless: neither the caller nor a
+     * getter's side effect can change an edge between the snapshot and its use.
+     */
+    private fun Rect.scissorBounds(): FloatArray? {
+        val left = left
+        val top = top
+        val right = right
+        val bottom = bottom
+        if (!left.isDrawable() || !top.isDrawable() || !right.isDrawable() || !bottom.isDrawable()) return null
+        val bounds = floatArrayOf(left.drawFloat(), top.drawFloat(), right.drawFloat(), bottom.drawFloat())
+        val width = bounds[2] - bounds[0]
+        val height = bounds[3] - bounds[1]
+        if (!width.isFinite() || !height.isFinite()) return null
+        return if (width > 0f && height > 0f) bounds else null
+    }
+
+    /**
+     * The exact output-space intersection of the parent clip and this scissor's projected
+     * quadrilateral.
+     *
+     * The full local-to-output matrix is the graphics affine composed with the pending projective
+     * row. The four corners are projected individually, not as an axis-aligned bound; a quadrilateral
+     * whose edge cuts through its own bounding box would otherwise paint outside the scissor. The
+     * parent is the frozen output clip when one is active, or the graphics clip at entry otherwise,
+     * so nested scissors intersect exactly and a later transform cannot move an earlier one.
+     */
+    context(renderParam: WindowRenderParam)
+    private fun effectiveClip(graphics: Graphics2D, local: FloatArray): Area? {
+        val perspective = renderParam.perspective?.let { matrixOf(it) }
+        val device = deviceMatrix(graphics.transform, perspective)
+        // A singular or non-finite composition has no meaningful projected scissor: fail closed
+        // rather than letting Java2D pick a half-defined clip from it.
+        if (invert(device) == null) return null
+        val xs = doubleArrayOf(local[0].toDouble(), local[2].toDouble(), local[2].toDouble(), local[0].toDouble())
+        val ys = doubleArrayOf(local[1].toDouble(), local[1].toDouble(), local[3].toDouble(), local[3].toDouble())
+        val projected = DoubleArray(8)
+        for (corner in 0 until 4) {
+            val localX = xs[corner]
+            val localY = ys[corner]
+            val w = device[6] * localX + device[7] * localY + device[8]
+            // The scissor contract is w > 0, not the draw path's larger epsilon: a small but
+            // positive homogeneous weight is still a point on the visible side of the eye plane.
+            if (!(w > 0.0) || !w.isFinite()) return null
+            val x = (device[0] * localX + device[1] * localY + device[2]) / w
+            val y = (device[3] * localX + device[4] * localY + device[5]) / w
+            if (!x.isFinite() || !y.isFinite()) return null
+            projected[corner * 2] = x
+            projected[corner * 2 + 1] = y
+        }
+        val path = Path2D.Double()
+        path.moveTo(projected[0], projected[1])
+        path.lineTo(projected[2], projected[3])
+        path.lineTo(projected[4], projected[5])
+        path.lineTo(projected[6], projected[7])
+        path.closePath()
+        val area = Area(path)
+        val parent = renderParam.outputClip ?: graphics.clip?.let { clip ->
+            runCatching { Area(graphics.transform.createTransformedShape(clip)) }.getOrNull()
+        }
+        if (parent != null) area.intersect(parent)
+        return area
+    }
+
+    /**
+     * Install [output] as the native clip by mapping it back through the current affine.
+     *
+     * Graphics2D exposes its clip in the current user space. The frozen region lives
+     * in output space, so its inverse image makes the resulting device clip equal to [output].
+     * A transform that cannot be inverted fails closed instead of leaving an unbounded clip.
+     */
+    private fun setNativeClip(graphics: Graphics2D, output: Area) {
+        if (output.isEmpty) {
+            graphics.clip = Path2D.Double()
+            return
+        }
+        val user = runCatching { graphics.transform.createInverse().createTransformedShape(output) }.getOrNull()
+        val bounds = user?.bounds2D
+        if (user == null || bounds == null ||
+            !bounds.minX.isFinite() || !bounds.minY.isFinite() ||
+            !bounds.maxX.isFinite() || !bounds.maxY.isFinite()
+        ) {
+            graphics.clip = Path2D.Double()
+            return
+        }
+        graphics.clip = user
     }
 
     override fun getFont(name: String?): DslFont<WindowRenderParam> = WindowCaches.fonts.getOrPut(name) { WindowFont(name) }
