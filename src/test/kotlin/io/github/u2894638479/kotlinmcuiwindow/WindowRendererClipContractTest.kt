@@ -563,9 +563,6 @@ class WindowRendererClipContractTest {
         try {
             context(param) {
                 renderer.withScissor(rect) {
-                    val snapshot = assertNotNull(param.clip, "a valid rectangular request is snapshotted")
-                    assertEquals(12.0, snapshot.left.raw, "left edge snapshot")
-                    assertEquals(60.0, snapshot.right.raw, "right edge snapshot")
                     rect.left = 74.px
                     rect.top = 70.px
                     rect.right = 92.px
@@ -605,7 +602,6 @@ class WindowRendererClipContractTest {
             assertEquals(1, blocks, "the throwing block ran once")
             assertNull(graphics.clip, "the outermost clip is restored")
             assertEquals(AffineTransform(), graphics.transform, "the transform is restored")
-            assertNull(param.clip, "the clip hint is restored")
             assertNull(param.outputClip, "the frozen region is restored")
             assertNull(param.perspective, "the perspective is restored")
 

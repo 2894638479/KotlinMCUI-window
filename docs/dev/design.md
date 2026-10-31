@@ -88,7 +88,7 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 
 投影四边形的四个角必须 `w > 0` 且坐标有限；矩阵必须可逆。矩形宽高非正、未测量/非有限、Float 范围溢出、当前裁剪变换奇异、任一角穿过或落在视平面之后，都会得到**空裁剪**而不是“退化为不裁剪”。空父裁剪保持空，子 scissor 和后续绘制都不会重新打开覆盖。此时 block 仍然恰好执行一次：副作用与控制流不能因为裁剪无效而消失。
 
-输出空间区域在进入时冻结，并作为原生 Java2D clip 覆盖本 scope 内的所有内容：两种 quad、两种 triangle 列表、文字与装饰、widget 底板、物品图标和原生 AWT 绘制都服从同一个区域。作用于图形状态的裁剪会按当时的仿射重新映射回用户空间，所以 scope 内的仿射变换不会带着裁剪一起漂移。裁剪只影响覆盖率，不改变源颜色/UV 场、source-over、alpha 或绘制顺序，也不引入隔离组混合。`withScissor` 和 `withTransform` 都在 `finally` 恢复进入前的 paint/composite/transform/clip（只恢复实际改过的部分），异常原样传播；已经画出的像素不回滚。`WindowRenderParam.clip` 只是在请求为有限正矩形时保存的快照，供兼容读取；它无法表示旋转、透视或交集后的区域，覆盖一律以原生 clip 为准。
+输出空间区域在进入时冻结，并作为原生 Java2D clip 覆盖本 scope 内的所有内容：两种 quad、两种 triangle 列表、文字与装饰、widget 底板、物品图标和原生 AWT 绘制都服从同一个区域。作用于图形状态的裁剪会按当时的仿射重新映射回用户空间，所以 scope 内的仿射变换不会带着裁剪一起漂移。裁剪只影响覆盖率，不改变源颜色/UV 场、source-over、alpha 或绘制顺序，也不引入隔离组混合。`withScissor` 和 `withTransform` 都在 `finally` 恢复进入前的 paint/composite/transform/clip（只恢复实际改过的部分），异常原样传播；已经画出的像素不回滚。
 
 延迟消费者若出现，必须在调用返回前拷贝可变的 `Rect`/UV 与两个类型化数组。
 

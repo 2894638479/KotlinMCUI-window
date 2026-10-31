@@ -820,7 +820,6 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
     override fun withScissor(rect: Rect, block: () -> Unit) {
         val graphics = renderParam.graphics
         val savedClip = graphics.clip
-        val savedRect = renderParam.clip
         val savedOutput = renderParam.outputClip
         try {
             // Snapshot every edge before the block: a caller's Rect may be backed by mutable state,
@@ -828,8 +827,6 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
             // positive extent from changing while the block runs.
             val bounds = rect.scissorBounds()
             val active = bounds?.let { effectiveClip(graphics, it) }
-            // The actual clip is the native one; this field only records a valid rectangular request.
-            renderParam.clip = bounds?.let { Rect(it[0].px, it[1].px, it[2].px, it[3].px) }
             renderParam.outputClip = active ?: Area()
             if (active == null) {
                 // Invalid geometry, a singular local-to-output matrix, an eye-plane crossing or an
@@ -842,7 +839,6 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
             block()
         } finally {
             graphics.setClip(savedClip)
-            renderParam.clip = savedRect
             renderParam.outputClip = savedOutput
         }
     }
