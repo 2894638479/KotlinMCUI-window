@@ -17,48 +17,41 @@ import io.github.u2894638479.kotlinmcui.text.DslFont
 import io.github.u2894638479.kotlinmcui.text.DslRenderableChar
 import java.awt.AlphaComposite
 import java.awt.Graphics2D
-import java.awt.LinearGradientPaint
 import java.awt.Paint
 import java.awt.RenderingHints
 import java.awt.Shape
-import java.awt.TexturePaint
 import java.awt.geom.AffineTransform
 import java.awt.geom.Path2D
-import java.awt.geom.Point2D
 import java.awt.geom.Rectangle2D
 import java.awt.image.BufferedImage
-import kotlin.math.roundToInt
+import kotlin.math.ceil
+import kotlin.math.floor
 
 /**
  * Java2D implementation of the rendering contract.
  *
- * Everything the framework draws is a quad, and a quad is what Java2D fills best, so this backend is
- * "one [renderQuad] plus an approximation for whatever Java2D has no equivalent of". The
- * approximations are named where they are made:
+ * Primitives carry a colour field, not a flat colour: a quad's four corners define one bilinear
+ * field over its original local rectangle, and a triangle list defines one barycentric field per
+ * triangle. [WindowFieldPaint] answers a quad's fill per device pixel from the inverse of the full
+ * local-to-device matrix, so an affine or positive-`w` projective transform still samples the
+ * draw's original local coordinates. A triangle list is rasterised jointly instead, because
+ * adjacent triangles share edges: the top-left half-open rule gives each sample one owner, which
+ * removes the internal seam, while a 4x4 subpixel mask keeps anti-aliased outer edges and real
+ * overlapping areas still composite in supplied order.
  *
- * - **four independent corner colours** are one bilinear fill: two triangles would share a diagonal,
- *   and anti-aliased fills that only half cover it leave a line where the surface shows through,
- * - **per-vertex colour interpolation** is done by hand: the field through three colours is affine,
- *   and a two-by-two image filtered bilinearly reproduces an affine field exactly,
- * - **a perspective is projected by hand**: `AffineTransform` has six numbers and a projective third
- *   row has nowhere to go in it, so the corners of a quad or triangle are projected and filled flat,
- *   and anything that is not a quad or a triangle - text, above all - stays affine under it. A
- *   textured shape under a perspective keeps the draw's own UV range, mapped affinely onto the
- *   projected geometry; its correspondence to the corners is approximate and not per-pixel, but it
- *   is still the requested texture, never a stretched whole-image replacement,
- * - **Minecraft's textures are never read**: the widget backgrounds and the item stand-in below are
- *   drawn from this backend's own palette, because a window that is not a game window has no
- *   resource pack to read them from.
+ * Java2D cannot carry a projective third row in `AffineTransform`, so a projective scope is kept in
+ * the render parameter and composed with the graphics state; an affine scope nested inside one is
+ * folded into the pending matrix so the composition order is preserved. Text and everything that is
+ * not a quad or a triangle stays affine under a perspective transform.
  *
- * The primitive overloads take the current typed input: colour-only quads have no image or UV,
+ * Minecraft's textures are never read: the widget backgrounds and the item stand-in are drawn from
+ * this backend's own palette, because a window that is not a game window has no resource pack to
+ * read them from. The primitive overloads take typed input: colour-only quads have no image or UV,
  * textured quads require both, and triangle lists are either `x, y` or `x, y, u, v` per vertex.
- * Their structure and numeric validation happens here, before any texture lookup. A texture that
- * is still loading draws nothing; one whose source is confirmed unusable is drawn as the backend's
+ * Their structure and numeric validation happens here, before any texture lookup. A texture that is
+ * still loading draws nothing; one whose source is confirmed unusable is drawn as the backend's
  * missing texture through the same geometry, UV and tint, never as a flat colour or untextured draw.
  */
-/** The resolution of a Gouraud texture: an affine field needs no more than a few samples per axis. */
-private const val GOURAUD_SIZE = 32
-
 internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
     /**
      * The surface the scale is derived from, set by the window's frame loop before every frame so it is
@@ -74,7 +67,7 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
     context(renderParam: WindowRenderParam)
     override fun renderQuad(rect: Rect, lt: Color, rt: Color, lb: Color, rb: Color) {
         val bounds = rect.drawableBounds() ?: return
-        paintColoredQuad(bounds, lt, rt, lb, rb)
+        paintQuad(bounds, lt, rt, lb, rb, null, 0.0, 0.0, 0.0, 0.0)
     }
 
     context(renderParam: WindowRenderParam)
@@ -106,238 +99,186 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
         // Double keeps a tiny-but-valid nominal size from overflowing the scale to infinity.
         val uScale = sampled.width.toDouble() / image.width.raw
         val vScale = sampled.height.toDouble() / image.height.raw
+        val texX0 = u0.toDouble() * uScale
+        val texY0 = v0.toDouble() * vScale
+        val texX1 = u1.toDouble() * uScale
+        val texY1 = v1.toDouble() * vScale
+        if (!texX0.isFinite() || !texY0.isFinite() || !texX1.isFinite() || !texY1.isFinite()) return
+        paintQuad(bounds, lt, rt, lb, rb, sampled, texX0, texY0, texX1, texY1)
+    }
+
+    /**
+     * Paint a quad's one bilinear field over [bounds], sampling [texture] when one is given.
+     *
+     * The field lives in the original, untransformed rectangle: [QuadFieldPaint] maps every device
+     * pixel back through the inverse of the full local-to-device matrix, so a rotation, a shear or a
+     * projective transform all evaluate the same `u`, `v`. The shape Java2D fills is the projected
+     * rectangle in user space, which keeps its point-in-shape test, clip and outer anti-aliasing; the
+     * paint only supplies the sample. One fill means no shared diagonal, no doubled coverage and no
+     * internal seam.
+     */
+    context(renderParam: WindowRenderParam)
+    private fun paintQuad(
+        bounds: FloatArray,
+        lt: Color,
+        rt: Color,
+        lb: Color,
+        rb: Color,
+        texture: BufferedImage?,
+        texX0: Double,
+        texY0: Double,
+        texX1: Double,
+        texY1: Double,
+    ) {
         val (l, t, r, b) = bounds
         val graphics = renderParam.graphics
-        val tint = averageOf(lt, rt, lb, rb)
-        val perspective = renderParam.perspective
-        if (perspective != null) {
-            // Projected by hand: `AffineTransform` has nowhere to put a third row. The original UV
-            // range is still mapped over the projected shape's bounds, so two draws that differ only
-            // in UV sample different texture; the correspondence stays affine, not per-pixel.
-            val matrix = graphics.transform
-            val xs = FloatArray(4)
-            val ys = FloatArray(4)
-            putProjected(matrix, perspective, 0, l, t, xs, ys)
-            putProjected(matrix, perspective, 1, r, t, xs, ys)
-            putProjected(matrix, perspective, 2, r, b, xs, ys)
-            putProjected(matrix, perspective, 3, l, b, xs, ys)
-            paintProjectedTexture(graphics, xs, ys, u0, v0, u1, v1, sampled, uScale, vScale, tint)
+        // A constant field is just the colour: one source-over fill is byte-for-byte what the paint
+        // would produce per pixel, so the common widget plate (and the whole-window background) does
+        // not need a raster at all. Under a perspective the geometry still has to be projected, so
+        // the general path keeps it.
+        if (texture == null && renderParam.perspective == null && lt == rt && rt == lb && lb == rb) {
+            fillWithPaint(graphics, Rectangle2D.Float(l, t, r - l, b - t), lt.awt())
             return
         }
-        paintTexturedQuad(graphics, l, t, r, b, u0, v0, u1, v1, sampled, uScale, vScale, tint)
-    }
-
-    /**
-     * Paint [texture] over the quad [l,t,r,b] with UV [u0,v0,u1,v1] scaled by [uScale]/[vScale].
-     *
-     * UV is mapped affinely onto the quad and the paint covers the full image across one scaled
-     * image extent, so a negative or past-the-edge UV repeats the texture instead of being clamped
-     * or silently replaced. The scale is double precision because the UV and the nominal size may
-     * be tiny; the product still lands on image pixels instead of overflowing through `Float`.
-     */
-    private fun paintTexturedQuad(
-        graphics: Graphics2D,
-        l: Float, t: Float, r: Float, b: Float,
-        u0: Float, v0: Float, u1: Float, v1: Float,
-        texture: BufferedImage,
-        uScale: Double,
-        vScale: Double,
-        tint: Color,
-    ) {
-        val x0 = u0.toDouble() * uScale
-        val y0 = v0.toDouble() * vScale
-        val x1 = u1.toDouble() * uScale
-        val y1 = v1.toDouble() * vScale
-        val width = x1 - x0
-        val height = y1 - y0
-        if (width <= 0.0 || height <= 0.0 || !width.isFinite() || !height.isFinite()) return
-        val sx = (r - l).toDouble() / width
-        val sy = (b - t).toDouble() / height
-        if (!sx.isFinite() || !sy.isFinite()) return
-        val mapping = AffineTransform(
-            sx, 0.0, 0.0, sy,
-            (l - x0 * sx), (t - y0 * sy),
+        val perspective = renderParam.perspective?.let { matrixOf(it) }
+        val inverse = invert(deviceMatrix(graphics.transform, perspective)) ?: return
+        val width = (r - l).toDouble()
+        val height = (b - t).toDouble()
+        val corners = FloatArray(16)
+        premultiply(lt, corners, 0)
+        premultiply(rt, corners, 4)
+        premultiply(lb, corners, 8)
+        premultiply(rb, corners, 12)
+        val shape = projectedPolygon(
+            perspective,
+            doubleArrayOf(l.toDouble(), r.toDouble(), r.toDouble(), l.toDouble()),
+            doubleArrayOf(t.toDouble(), t.toDouble(), b.toDouble(), b.toDouble()),
+        ) ?: return
+        fillWithPaint(
+            graphics,
+            shape,
+            QuadFieldPaint(
+                inverse,
+                l.toDouble(), t.toDouble(),
+                1.0 / width, 1.0 / height,
+                corners, texture, texX0, texY0, texX1, texY1,
+            ),
         )
-        val savedTransform = graphics.transform
-        graphics.transform(mapping)
-        try {
-            paintTexture(
-                graphics,
-                Rectangle2D.Double(x0, y0, width, height),
-                texture,
-                Rectangle2D.Double(0.0, 0.0, texture.width.toDouble(), texture.height.toDouble()),
-                tint,
-            )
-        } finally {
-            graphics.transform = savedTransform
+    }
+
+    /** A straight corner colour as the premultiplied floats the field is evaluated in. */
+    private fun premultiply(color: Color, out: FloatArray, offset: Int) {
+        val alpha = color.aInt / 255f
+        out[offset] = color.rInt / 255f * alpha
+        out[offset + 1] = color.gInt / 255f * alpha
+        out[offset + 2] = color.bInt / 255f * alpha
+        out[offset + 3] = alpha
+    }
+
+    /** A straight framework colour as Java2D's own paint, for the exactly equivalent uniform fill. */
+    private fun Color.awt() = java.awt.Color(rInt, gInt, bInt, aInt)
+
+    /** The local-to-device matrix: the affine graphics state composed with the pending perspective. */
+    private fun deviceMatrix(affine: AffineTransform, perspective: DoubleArray?): DoubleArray {
+        val matrix = doubleArrayOf(
+            affine.scaleX, affine.shearX, affine.translateX,
+            affine.shearY, affine.scaleY, affine.translateY,
+            0.0, 0.0, 1.0,
+        )
+        return perspective?.let { multiply(matrix, it) } ?: matrix
+    }
+
+    private fun matrixOf(perspective: WindowPerspective): DoubleArray =
+        DoubleArray(9).also { perspective.writeMatrix(it) }
+
+    private fun multiply(a: DoubleArray, b: DoubleArray): DoubleArray {
+        val out = DoubleArray(9)
+        for (row in 0 until 3) {
+            for (column in 0 until 3) {
+                out[row * 3 + column] =
+                    a[row * 3] * b[column] +
+                        a[row * 3 + 1] * b[3 + column] +
+                        a[row * 3 + 2] * b[6 + column]
+            }
         }
+        return out
     }
 
     /**
-     * Paint [texture] across the already-projected corners [xs]/[ys], using the original [u0,v0,u1,v1].
+     * The inverse of a 3x3 matrix, or `null` when it has none.
      *
-     * The shape is the exact projected geometry, but Java2D cannot carry a projective texture map,
-     * so the UV range is mapped onto the shape's bounding box and clipped by the projected outline:
-     * real texture pixels chosen by the draw's own UV, an approximate (affine, not per-pixel)
-     * correspondence between them and the corners.
+     * The determinant alone is not the whole test: a near-singular transform inverts to infinite
+     * entries, which would leave a partially evaluated draw, so those are rejected too. A caller
+     * that gets `null` draws nothing, which is the backend's safe answer for a matrix it cannot
+     * carry.
      */
-    private fun paintProjectedTexture(
-        graphics: Graphics2D,
-        xs: FloatArray,
-        ys: FloatArray,
-        u0: Float, v0: Float, u1: Float, v1: Float,
-        texture: BufferedImage,
-        uScale: Double,
-        vScale: Double,
-        tint: Color,
-    ) {
-        val x0 = u0.toDouble() * uScale
-        val y0 = v0.toDouble() * vScale
-        val x1 = u1.toDouble() * uScale
-        val y1 = v1.toDouble() * vScale
-        val sourceWidth = x1 - x0
-        val sourceHeight = y1 - y0
-        if (sourceWidth <= 0.0 || sourceHeight <= 0.0 || !sourceWidth.isFinite() || !sourceHeight.isFinite()) return
-        var minX = xs[0]
-        var maxX = xs[0]
-        var minY = ys[0]
-        var maxY = ys[0]
-        for (index in 1 until xs.size) {
-            minX = minOf(minX, xs[index])
-            maxX = maxOf(maxX, xs[index])
-            minY = minOf(minY, ys[index])
-            maxY = maxOf(maxY, ys[index])
-        }
-        if (maxX <= minX || maxY <= minY) return
-        val sx = (maxX - minX).toDouble() / sourceWidth
-        val sy = (maxY - minY).toDouble() / sourceHeight
-        if (!sx.isFinite() || !sy.isFinite()) return
-        val savedTransform = graphics.transform
-        // Device space already: the fill must not be transformed a second time.
-        graphics.transform = AffineTransform()
-        try {
-            paintTexture(
-                graphics,
-                polygon(xs, ys),
-                texture,
-                // Where image pixel (0,0) lands when the scaled UV range fills the projected bounds.
-                Rectangle2D.Double(
-                    minX - x0 * sx,
-                    minY - y0 * sy,
-                    texture.width * sx,
-                    texture.height * sy,
-                ),
-                tint,
-            )
-        } finally {
-            graphics.transform = savedTransform
-        }
+    private fun invert(matrix: DoubleArray): DoubleArray? {
+        val c00 = matrix[4] * matrix[8] - matrix[5] * matrix[7]
+        val c01 = matrix[5] * matrix[6] - matrix[3] * matrix[8]
+        val c02 = matrix[3] * matrix[7] - matrix[4] * matrix[6]
+        val determinant = matrix[0] * c00 + matrix[1] * c01 + matrix[2] * c02
+        if (determinant == 0.0 || !determinant.isFinite()) return null
+        val scale = 1.0 / determinant
+        val inverse = doubleArrayOf(
+            c00 * scale, (matrix[2] * matrix[7] - matrix[1] * matrix[8]) * scale,
+            (matrix[1] * matrix[5] - matrix[2] * matrix[4]) * scale,
+            c01 * scale, (matrix[0] * matrix[8] - matrix[2] * matrix[6]) * scale,
+            (matrix[2] * matrix[3] - matrix[0] * matrix[5]) * scale,
+            c02 * scale, (matrix[1] * matrix[6] - matrix[0] * matrix[7]) * scale,
+            (matrix[0] * matrix[4] - matrix[1] * matrix[3]) * scale,
+        )
+        for (value in inverse) if (!value.isFinite()) return null
+        return inverse
     }
 
     /**
-     * Fill [shape] with [texture] tinted by [tint], anchored at [anchor].
+     * The polygon the fill covers, in user space, or `null` when the projection is not usable.
      *
-     * The tint's RGB multiplies the texture's RGB per texel, and only the texture's pixels are
-     * touched: a transparent texel stays transparent instead of painting the tint over whatever was
-     * already in the destination. The tint's alpha scales the whole texture once, through the
-     * composite of the single `SRC_OVER` fill. A white tint needs no texel work at all, so it keeps
-     * the direct `TexturePaint` fast path.
+     * Without a perspective the local points are already user space. With one, each is projected by
+     * hand and the positive-`w` guard rejects a transform that reaches or crosses the eye plane: a
+     * draw that cannot be projected is skipped whole instead of half-painted.
      */
-    private fun paintTexture(graphics: Graphics2D, shape: Shape, image: BufferedImage, anchor: Rectangle2D, tint: Color) {
-        // A fully transparent tint contributes nothing, and copying the texture for it would be
-        // wasted work as well as a needless allocation.
-        if (tint.aInt == 0) return
-        val source = if (tint.isWhiteRgb) image else tintedTexture(image, tint)
-        val savedComposite = graphics.composite
+    private fun projectedPolygon(perspective: DoubleArray?, xs: DoubleArray, ys: DoubleArray): Path2D.Double? {
+        val path = Path2D.Double()
+        for (index in xs.indices) {
+            val localX = xs[index]
+            val localY = ys[index]
+            var x = localX
+            var y = localY
+            if (perspective != null) {
+                val w = perspective[6] * localX + perspective[7] * localY + perspective[8]
+                if (!(w > MIN_PROJECTIVE_W) || !w.isFinite()) return null
+                x = (perspective[0] * localX + perspective[1] * localY + perspective[2]) / w
+                y = (perspective[3] * localX + perspective[4] * localY + perspective[5]) / w
+            }
+            if (!x.isFinite() || !y.isFinite()) return null
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.closePath()
+        return path
+    }
+
+    /**
+     * One fill, one source-over.
+     *
+     * The paint is installed only around the fill and the composite is forced to source-over, which
+     * is the contract for a primitive landing on the UI. Both are restored on every exit, including
+     * an exception out of the paint. Nothing else in the graphics state is touched: the transform
+     * and the clip are the ones the caller set.
+     */
+    private fun fillWithPaint(graphics: Graphics2D, shape: Shape, paint: Paint) {
         val savedPaint = graphics.paint
+        val savedComposite = graphics.composite
         try {
-            graphics.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, tint.aFloat)
-            graphics.paint = TexturePaint(source, anchor)
+            graphics.composite = AlphaComposite.SrcOver
+            graphics.paint = paint
             graphics.fill(shape)
         } finally {
-            graphics.composite = savedComposite
             graphics.paint = savedPaint
+            graphics.composite = savedComposite
         }
     }
 
-    /** Whether [tint]'s colour is white, so multiplying by it leaves every RGB channel unchanged. */
-    private val Color.isWhiteRgb: Boolean
-        get() = rInt == 255 && gInt == 255 && bInt == 255
-
-    /**
-     * A copy of [image]'s RGB channels multiplied by [tint]'s, its alpha untouched.
-     *
-     * One entry only: the copy is reused while the same image is drawn with the same tint colour at
-     * the same size. Tints alternate far less often than frames do, and a texture is usually drawn
-     * many times before it changes, so a single entry removes the repeat work without turning into
-     * an unbounded cache of tinted copies. Painting is confined to one thread, so the entry and its
-     * pixel buffer need no locking.
-     */
-    private fun tintedTexture(image: BufferedImage, tint: Color): BufferedImage {
-        val key = (tint.rInt shl 16) or (tint.gInt shl 8) or tint.bInt
-        val cached = tintedImage
-        if (cached != null && tintedSource === image && tintedKey == key &&
-            cached.width == image.width && cached.height == image.height
-        ) {
-            return cached
-        }
-        val target = if (cached != null && cached.width == image.width && cached.height == image.height) {
-            cached
-        } else {
-            BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_ARGB)
-        }
-        val count = image.width * image.height
-        if (tintedPixels.size != count) tintedPixels = IntArray(count)
-        val pixels = tintedPixels
-        image.getRGB(0, 0, image.width, image.height, pixels, 0, image.width)
-        val tintR = tint.rInt
-        val tintG = tint.gInt
-        val tintB = tint.bInt
-        for (index in 0 until count) {
-            val argb = pixels[index]
-            val alpha = argb ushr 24 and 0xFF
-            val r = ((argb shr 16 and 0xFF) * tintR) / 255
-            val g = ((argb shr 8 and 0xFF) * tintG) / 255
-            val b = ((argb and 0xFF) * tintB) / 255
-            // Alpha is carried over untouched: only the composite scales it, exactly once.
-            pixels[index] = (alpha shl 24) or (r shl 16) or (g shl 8) or b
-        }
-        target.setRGB(0, 0, image.width, image.height, pixels, 0, image.width)
-        tintedImage = target
-        tintedSource = image
-        tintedKey = key
-        return target
-    }
-
-    /** Paint the colour-only quad whose validated float bounds are [bounds]. */
-    context(renderParam: WindowRenderParam)
-    private fun paintColoredQuad(bounds: FloatArray, lt: Color, rt: Color, lb: Color, rb: Color) {
-        val (l, t, r, b) = bounds
-        val graphics = renderParam.graphics
-        val perspective = renderParam.perspective
-        if (perspective != null) {
-            val matrix = graphics.transform
-            val xs = FloatArray(4)
-            val ys = FloatArray(4)
-            putProjected(matrix, perspective, 0, l, t, xs, ys)
-            putProjected(matrix, perspective, 1, r, t, xs, ys)
-            putProjected(matrix, perspective, 2, r, b, xs, ys)
-            putProjected(matrix, perspective, 3, l, b, xs, ys)
-            fillPolygon(xs, ys, averageOf(lt, rt, lb, rb).awt())
-            return
-        }
-        val paint = gradientPaint(l, t, r, b, lt, rt, lb, rb)
-        if (paint != null) {
-            graphics.paint = paint
-            graphics.fill(Rectangle2D.Float(l, t, r - l, b - t))
-        } else {
-            // Four unrelated corners - a two-dimensional palette, say. One fill over the whole
-            // rectangle: two triangles would share the diagonal, and Java2D anti-aliases each
-            // fill on its own, so the two would cover half of its pixels each and leave the
-            // surface behind showing through as a line.
-            fillBilinear(graphics, l, t, r, b, lt, rt, lb, rb)
-        }
-    }
 
     context(renderParam: WindowRenderParam)
     override fun renderTriangles(vertices: MeasureArray, colors: ColorArray) {
@@ -375,9 +316,17 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
     /**
      * Paint a structurally and numerically validated triangle list.
      *
-     * [texture] is `null` only for the untextured overload; the stride is already fixed by then, so
-     * a missing or failed texture can never change the format. [uScale]/[vScale] are the UV-to-pixel
-     * scale of the image that is actually sampled.
+     * A list of triangles is one surface, not a stack of independent fills: giving each triangle its
+     * own anti-aliased fill composites a shared edge twice and leaves an alpha seam. The list is
+     * therefore rasterised jointly in device space. The top-left half-open rule gives each pixel
+     * centre exactly one owner on an internal edge, while a centre strictly inside two triangles is
+     * a real overlap and both are composited, in the supplied order. Coverage comes from a 4x4
+     * subpixel mask, so outer edges keep their anti-aliasing. [texture] is `null` only for the
+     * untextured overload; [uScale]/[vScale] are the UV-to-pixel scale of the image actually
+     * sampled. A triangle whose projection or scaled UV cannot be carried is skipped whole rather
+     * than drawn half; a matrix unusable for the call as a whole draws nothing. The finished pixels
+     * are blitted in bounded tiles with one source-over per pixel, so destination colour and alpha
+     * follow the same contract as a quad.
      */
     context(renderParam: WindowRenderParam)
     private fun paintTriangles(
@@ -389,125 +338,386 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
         vScale: Double,
     ) {
         val graphics = renderParam.graphics
-        val perspective = renderParam.perspective
+        val perspective = renderParam.perspective?.let { matrixOf(it) }
+        val device = deviceMatrix(graphics.transform, perspective)
+        val inverse = invert(device) ?: return
+        val triangleCount = colors.size / 3
+        if (triangleCount == 0) return
+
+        // Everything the pixel loop needs, filled once: local vertices for the barycentric field and
+        // the top-left test, device vertices for the bounds, premultiplied tints and texture UVs.
+        val local = DoubleArray(triangleCount * 6)
+        val projected = DoubleArray(triangleCount * 6)
+        val tints = FloatArray(triangleCount * 12)
+        val texels = DoubleArray(triangleCount * 6)
+        val counterClockwise = BooleanArray(triangleCount)
+        val valid = BooleanArray(triangleCount)
+        var left = Double.POSITIVE_INFINITY
+        var top = Double.POSITIVE_INFINITY
+        var right = Double.NEGATIVE_INFINITY
+        var bottom = Double.NEGATIVE_INFINITY
         var vertex = 0
         var color = 0
-        while (vertex < vertices.size) {
-            val x0 = vertices[vertex].drawFloat()
-            val y0 = vertices[vertex + 1].drawFloat()
-            val x1 = vertices[vertex + stride].drawFloat()
-            val y1 = vertices[vertex + stride + 1].drawFloat()
-            val x2 = vertices[vertex + stride * 2].drawFloat()
-            val y2 = vertices[vertex + stride * 2 + 1].drawFloat()
-            val c0 = colors[color].rgbaInt
-            val c1 = colors[color + 1].rgbaInt
-            val c2 = colors[color + 2].rgbaInt
-            if (texture == null) {
-                if (perspective != null) {
-                    val matrix = graphics.transform
-                    val xs = FloatArray(3)
-                    val ys = FloatArray(3)
-                    putProjected(matrix, perspective, 0, x0, y0, xs, ys)
-                    putProjected(matrix, perspective, 1, x1, y1, xs, ys)
-                    putProjected(matrix, perspective, 2, x2, y2, xs, ys)
-                    fillPolygon(xs, ys, averageOf(c0, c1, c2))
-                } else {
-                    fillGouraud(graphics, x0, y0, x1, y1, x2, y2, c0, c1, c2)
-                }
-            } else {
-                val u0 = vertices[vertex + 2].drawFloat().toDouble() * uScale
-                val v0 = vertices[vertex + 3].drawFloat().toDouble() * vScale
-                val u1 = vertices[vertex + stride + 2].drawFloat().toDouble() * uScale
-                val v1 = vertices[vertex + stride + 3].drawFloat().toDouble() * vScale
-                val u2 = vertices[vertex + stride * 2 + 2].drawFloat().toDouble() * uScale
-                val v2 = vertices[vertex + stride * 2 + 3].drawFloat().toDouble() * vScale
-                val tint = average(Color(c0), Color(c1), Color(c2))
-                if (perspective != null) {
-                    val matrix = graphics.transform
-                    val xs = FloatArray(3)
-                    val ys = FloatArray(3)
-                    putProjected(matrix, perspective, 0, x0, y0, xs, ys)
-                    putProjected(matrix, perspective, 1, x1, y1, xs, ys)
-                    putProjected(matrix, perspective, 2, x2, y2, xs, ys)
-                    paintTexturedTriangle(
-                        graphics, xs[0].toDouble(), ys[0].toDouble(), xs[1].toDouble(), ys[1].toDouble(),
-                        xs[2].toDouble(), ys[2].toDouble(),
-                        u0, v0, u1, v1, u2, v2, texture, tint, device = true,
-                    )
-                } else {
-                    paintTexturedTriangle(
-                        graphics, x0.toDouble(), y0.toDouble(), x1.toDouble(), y1.toDouble(),
-                        x2.toDouble(), y2.toDouble(),
-                        u0, v0, u1, v1, u2, v2, texture, tint, device = false,
-                    )
-                }
+        for (index in 0 until triangleCount) {
+            val ax = vertices[vertex].drawFloat().toDouble()
+            val ay = vertices[vertex + 1].drawFloat().toDouble()
+            val bx = vertices[vertex + stride].drawFloat().toDouble()
+            val by = vertices[vertex + stride + 1].drawFloat().toDouble()
+            val cx = vertices[vertex + stride * 2].drawFloat().toDouble()
+            val cy = vertices[vertex + stride * 2 + 1].drawFloat().toDouble()
+            val base = index * 6
+            local[base] = ax
+            local[base + 1] = ay
+            local[base + 2] = bx
+            local[base + 3] = by
+            local[base + 4] = cx
+            local[base + 5] = cy
+            premultiply(colors[color], tints, index * 12)
+            premultiply(colors[color + 1], tints, index * 12 + 4)
+            premultiply(colors[color + 2], tints, index * 12 + 8)
+            val area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+            var drawable = area != 0.0 && area.isFinite()
+            if (drawable && !(projectPoint(device, ax, ay, projected, base) &&
+                    projectPoint(device, bx, by, projected, base + 2) &&
+                    projectPoint(device, cx, cy, projected, base + 4))) return
+            if (drawable && texture != null) {
+                texels[base] = vertices[vertex + 2].drawFloat().toDouble() * uScale
+                texels[base + 1] = vertices[vertex + 3].drawFloat().toDouble() * vScale
+                texels[base + 2] = vertices[vertex + stride + 2].drawFloat().toDouble() * uScale
+                texels[base + 3] = vertices[vertex + stride + 3].drawFloat().toDouble() * vScale
+                texels[base + 4] = vertices[vertex + stride * 2 + 2].drawFloat().toDouble() * uScale
+                texels[base + 5] = vertices[vertex + stride * 2 + 3].drawFloat().toDouble() * vScale
+                for (offset in 0 until 6) if (!texels[base + offset].isFinite()) drawable = false
             }
             vertex += stride * 3
             color += 3
+            if (!drawable) continue
+            valid[index] = true
+            counterClockwise[index] = area > 0.0
+            left = minOf(left, projected[base], projected[base + 2], projected[base + 4])
+            right = maxOf(right, projected[base], projected[base + 2], projected[base + 4])
+            top = minOf(top, projected[base + 1], projected[base + 3], projected[base + 5])
+            bottom = maxOf(bottom, projected[base + 1], projected[base + 3], projected[base + 5])
         }
-    }
+        if (!left.isFinite() || !top.isFinite() || !right.isFinite() || !bottom.isFinite()) return
 
-    /**
-     * Paint [texture] across one triangle, with UV at its corners.
-     *
-     * [device] is `true` when the corners are already projected, in which case the affine map that
-     * sends UV to them replaces the current transform rather than being concatenated onto it. The
-     * map is affine over the projected triangle, so perspective correction stays deferred. A
-     * degenerate UV triangle has no such map, so the texture is read at its first UV instead of
-     * falling back to a palette colour.
-     */
-    private fun paintTexturedTriangle(
-        graphics: Graphics2D,
-        x0: Double, y0: Double, x1: Double, y1: Double, x2: Double, y2: Double,
-        u0: Double, v0: Double, u1: Double, v1: Double, u2: Double, v2: Double,
-        texture: BufferedImage,
-        tint: Color,
-        device: Boolean,
-    ) {
-        val mapping = uvToUser(u0, v0, x0, y0, u1, v1, x1, y1, u2, v2, x2, y2)
-        if (mapping == null) {
-            val savedTransform = graphics.transform
-            // Device space already: filling through the current transform would place it twice.
-            if (device) graphics.transform = AffineTransform()
-            try {
-                graphics.color = textureColor(texture, u0, v0, tint)
-                graphics.fill(triangle(x0, y0, x1, y1, x2, y2))
-            } finally {
-                graphics.transform = savedTransform
-            }
-            return
+        val clip = graphics.clip
+        val deviceClip = clip?.let { graphics.transform.createTransformedShape(it) }
+        if (deviceClip != null) {
+            val bounds = deviceClip.bounds2D
+            left = maxOf(left, bounds.minX)
+            top = maxOf(top, bounds.minY)
+            right = minOf(right, bounds.maxX)
+            bottom = minOf(bottom, bounds.maxY)
         }
+        if (renderParam.width > 0 && renderParam.height > 0) {
+            left = maxOf(left, 0.0)
+            top = maxOf(top, 0.0)
+            right = minOf(right, renderParam.width.toDouble())
+            bottom = minOf(bottom, renderParam.height.toDouble())
+        }
+        // Bounded raster memory: a shape larger than this in device pixels cannot be a UI primitive,
+        // and converting an unbounded projection to int would overflow the tile walk as well.
+        if (!(right > left) || !(bottom > top)) return
+        if (right - left > MAX_TRIANGLE_EXTENT || bottom - top > MAX_TRIANGLE_EXTENT) return
+        val x0 = floor(left).toInt()
+        val y0 = floor(top).toInt()
+        val x1 = ceil(right).toInt()
+        val y1 = ceil(bottom).toInt()
+        if (x1 <= x0 || y1 <= y0) return
+
+        val patch = trianglePatchBuffer()
+        val row = triangleRowBuffer()
+        val owners = IntArray(triangleCount)
+        val weights = FloatArray(triangleCount * 3)
+        val samples = IntArray(triangleCount)
+        val sample = FloatArray(4)
+        val accumulated = FloatArray(4)
+
         val savedTransform = graphics.transform
-        if (device) graphics.transform = mapping else graphics.transform(mapping)
+        val savedClip = clip
+        val savedComposite = graphics.composite
         try {
-            paintTexture(
-                graphics,
-                triangle(u0, v0, u1, v1, u2, v2),
-                texture,
-                Rectangle2D.Double(0.0, 0.0, texture.width.toDouble(), texture.height.toDouble()),
-                tint,
-            )
+            graphics.composite = AlphaComposite.SrcOver
+            graphics.transform = AffineTransform()
+            graphics.clip = deviceClip
+            var tileTop = y0
+            while (tileTop < y1) {
+                val height = minOf(TILE, y1 - tileTop)
+                var tileLeft = x0
+                while (tileLeft < x1) {
+                    val width = minOf(TILE, x1 - tileLeft)
+                    for (py in 0 until height) {
+                        val deviceY = tileTop + py + 0.5
+                        for (px in 0 until width) {
+                            val deviceX = tileLeft + px + 0.5
+                            val homogeneous = inverse[6] * deviceX + inverse[7] * deviceY + inverse[8]
+                            if (homogeneous == 0.0 || !homogeneous.isFinite()) {
+                                row[px] = 0
+                                continue
+                            }
+                            val localX = (inverse[0] * deviceX + inverse[1] * deviceY + inverse[2]) / homogeneous
+                            val localY = (inverse[3] * deviceX + inverse[4] * deviceY + inverse[5]) / homogeneous
+                            var ownerCount = 0
+                            for (triangle in 0 until triangleCount) {
+                                if (!valid[triangle]) continue
+                                val base = triangle * 6
+                                if (!covers(local, base, counterClockwise[triangle], localX, localY)) continue
+                                owners[ownerCount] = triangle
+                                weightsAt(local, base, localX, localY, weights, ownerCount * 3)
+                                ownerCount++
+                            }
+
+                            var coverage = 0
+                            var fringeOwner = -1
+                            val fullCoverage = ownerCount > 0 && cornersCovered(
+                                local, counterClockwise, valid, triangleCount,
+                                inverse, tileLeft + px, tileTop + py,
+                            )
+                            if (fullCoverage) {
+                                coverage = SUBPIXELS
+                            } else {
+                                for (triangle in 0 until triangleCount) samples[triangle] = 0
+                                var union = 0
+                                for (subY in 0 until SUBDIVISION) {
+                                    for (subX in 0 until SUBDIVISION) {
+                                        val sampleX = tileLeft + px + (subX + 0.5) / SUBDIVISION
+                                        val sampleY = tileTop + py + (subY + 0.5) / SUBDIVISION
+                                        val w = inverse[6] * sampleX + inverse[7] * sampleY + inverse[8]
+                                        if (w == 0.0 || !w.isFinite()) continue
+                                        val sx = (inverse[0] * sampleX + inverse[1] * sampleY + inverse[2]) / w
+                                        val sy = (inverse[3] * sampleX + inverse[4] * sampleY + inverse[5]) / w
+                                        for (triangle in 0 until triangleCount) {
+                                            if (!valid[triangle]) continue
+                                            val base = triangle * 6
+                                            if (!covers(local, base, counterClockwise[triangle], sx, sy)) continue
+                                            samples[triangle]++
+                                            union++
+                                            break
+                                        }
+                                    }
+                                }
+                                coverage = union
+                                if (ownerCount == 0) {
+                                    var best = 0
+                                    for (triangle in 0 until triangleCount) {
+                                        if (samples[triangle] > best) {
+                                            best = samples[triangle]
+                                            fringeOwner = triangle
+                                        }
+                                    }
+                                    if (best == 0) {
+                                        row[px] = 0
+                                        continue
+                                    }
+                                }
+                            }
+                            // A centre owned by a razor-thin triangle still deserves its sample.
+                            if (coverage == 0 && ownerCount > 0) coverage = 1
+                            if (coverage == 0) {
+                                row[px] = 0
+                                continue
+                            }
+
+                            accumulated[0] = 0f
+                            accumulated[1] = 0f
+                            accumulated[2] = 0f
+                            accumulated[3] = 0f
+                            val factor = coverage.toFloat() / SUBPIXELS
+                            if (ownerCount > 0) {
+                                for (owner in 0 until ownerCount) {
+                                    if (!normalise(weights, owner * 3)) continue
+                                    sampleTriangle(tints, owners[owner] * 12, weights, owner * 3, texture,
+                                        owners[owner] * 6, texels, sample)
+                                    sourceOver(sample, factor, accumulated)
+                                }
+                            } else {
+                                weightsAt(local, fringeOwner * 6, localX, localY, weights, 0)
+                                if (normalise(weights, 0)) {
+                                    sampleTriangle(tints, fringeOwner * 12, weights, 0, texture,
+                                        fringeOwner * 6, texels, sample)
+                                    sourceOver(sample, factor, accumulated)
+                                }
+                            }
+                            row[px] = premultipliedToArgb(
+                                accumulated[0], accumulated[1], accumulated[2], accumulated[3],
+                            )
+                        }
+                        patch.setRGB(0, py, width, 1, row, 0, width)
+                    }
+                    graphics.drawImage(
+                        patch,
+                        tileLeft, tileTop, tileLeft + width, tileTop + height,
+                        0, 0, width, height,
+                        null,
+                    )
+                    tileLeft += width
+                }
+                tileTop += height
+            }
         } finally {
             graphics.transform = savedTransform
+            graphics.clip = savedClip
+            graphics.composite = savedComposite
         }
     }
 
+    /** Project one local point through [matrix], rejecting a non-positive or non-finite `w`. */
+    private fun projectPoint(matrix: DoubleArray, x: Double, y: Double, out: DoubleArray, offset: Int): Boolean {
+        val w = matrix[6] * x + matrix[7] * y + matrix[8]
+        if (!(w > MIN_PROJECTIVE_W) || !w.isFinite()) return false
+        val deviceX = (matrix[0] * x + matrix[1] * y + matrix[2]) / w
+        val deviceY = (matrix[3] * x + matrix[4] * y + matrix[5]) / w
+        if (!deviceX.isFinite() || !deviceY.isFinite()) return false
+        out[offset] = deviceX
+        out[offset + 1] = deviceY
+        return true
+    }
+
     /**
-     * One texture pixel at [u], [v], tinted by [tint]; used where no affine map exists.
+     * Whether a local point is owned by a triangle under the top-left half-open rule.
      *
-     * Out-of-range UV wraps, and a negative coordinate is floored rather than truncated so `-0.5`
-     * samples the same wrapped texel the texture tiling would. RGB is multiplied by the tint's RGB
-     * and alpha scaled by the tint's alpha once, exactly like the textured fill path.
+     * The rule is what makes an edge shared by two triangles belong to exactly one of them: an
+     * edge sample is accepted only when the edge runs up or, if horizontal, to the right. The
+     * orientation is normalised first, so reversing a mesh's vertex order cannot change ownership.
      */
-    private fun textureColor(texture: BufferedImage, u: Double, v: Double, tint: Color): java.awt.Color {
-        val argb = texture.getRGB(
-            Math.floorMod(Math.floor(u).toInt(), texture.width),
-            Math.floorMod(Math.floor(v).toInt(), texture.height),
-        )
-        val r = ((argb shr 16 and 0xFF) * tint.rInt) / 255
-        val g = ((argb shr 8 and 0xFF) * tint.gInt) / 255
-        val b = ((argb and 0xFF) * tint.bInt) / 255
-        return java.awt.Color(r, g, b, ((argb ushr 24) and 0xFF) * tint.aInt / 255)
+    private fun covers(local: DoubleArray, base: Int, counterClockwise: Boolean, x: Double, y: Double): Boolean {
+        val ax = local[base]
+        val ay = local[base + 1]
+        val bx = local[base + 2]
+        val by = local[base + 3]
+        val cx = local[base + 4]
+        val cy = local[base + 5]
+        return if (counterClockwise) {
+            side(ax, ay, bx, by, x, y) && side(bx, by, cx, cy, x, y) && side(cx, cy, ax, ay, x, y)
+        } else {
+            side(bx, by, ax, ay, x, y) && side(cx, cy, bx, by, x, y) && side(ax, ay, cx, cy, x, y)
+        }
+    }
+
+    private fun side(ax: Double, ay: Double, bx: Double, by: Double, x: Double, y: Double): Boolean {
+        val edge = (bx - ax) * (y - ay) - (by - ay) * (x - ax)
+        return when {
+            edge > EDGE_EPSILON -> true
+            edge < -EDGE_EPSILON -> false
+            else -> by < ay || (by == ay && bx > ax)
+        }
+    }
+
+    /** Barycentric weights of a local point in the triangle at [base], in its original vertex order. */
+    private fun weightsAt(local: DoubleArray, base: Int, x: Double, y: Double, out: FloatArray, offset: Int) {
+        val ax = local[base]
+        val ay = local[base + 1]
+        val bx = local[base + 2]
+        val by = local[base + 3]
+        val cx = local[base + 4]
+        val cy = local[base + 5]
+        val inverseArea = 1.0 / ((bx - ax) * (cy - ay) - (cx - ax) * (by - ay))
+        val weightB = ((cx - x) * (ay - y) - (ax - x) * (cy - y)) * inverseArea
+        val weightC = ((ax - x) * (by - y) - (bx - x) * (ay - y)) * inverseArea
+        out[offset] = (1.0 - weightB - weightC).toFloat()
+        out[offset + 1] = weightB.toFloat()
+        out[offset + 2] = weightC.toFloat()
+    }
+
+    /** Clamp a weight triple to the triangle and renormalise it; false when nothing remains. */
+    private fun normalise(weights: FloatArray, offset: Int): Boolean {
+        var a = weights[offset].coerceAtLeast(0f)
+        var b = weights[offset + 1].coerceAtLeast(0f)
+        var c = weights[offset + 2].coerceAtLeast(0f)
+        val sum = a + b + c
+        if (!(sum > 0f) || !sum.isFinite()) return false
+        a /= sum
+        b /= sum
+        c /= sum
+        weights[offset] = a
+        weights[offset + 1] = b
+        weights[offset + 2] = c
+        return true
+    }
+
+    /** Whether all four pixel corners are covered by the list, in which case coverage is full. */
+    private fun cornersCovered(
+        local: DoubleArray,
+        counterClockwise: BooleanArray,
+        valid: BooleanArray,
+        triangleCount: Int,
+        inverse: DoubleArray,
+        pixelX: Int,
+        pixelY: Int,
+    ): Boolean {
+        for (corner in 0 until 4) {
+            val deviceX = pixelX + if (corner and 1 == 0) 0.125 else 0.875
+            val deviceY = pixelY + if (corner and 2 == 0) 0.125 else 0.875
+            val w = inverse[6] * deviceX + inverse[7] * deviceY + inverse[8]
+            if (w == 0.0 || !w.isFinite()) return false
+            val x = (inverse[0] * deviceX + inverse[1] * deviceY + inverse[2]) / w
+            val y = (inverse[3] * deviceX + inverse[4] * deviceY + inverse[5]) / w
+            var covered = false
+            for (triangle in 0 until triangleCount) {
+                if (valid[triangle] && covers(local, triangle * 6, counterClockwise[triangle], x, y)) {
+                    covered = true
+                    break
+                }
+            }
+            if (!covered) return false
+        }
+        return true
+    }
+
+    /** Evaluate one triangle's premultiplied field at the given barycentric weights, including its texel. */
+    private fun sampleTriangle(
+        tints: FloatArray,
+        tintBase: Int,
+        weights: FloatArray,
+        weightBase: Int,
+        texture: BufferedImage?,
+        texelBase: Int,
+        texels: DoubleArray,
+        out: FloatArray,
+    ) {
+        val a = weights[weightBase]
+        val b = weights[weightBase + 1]
+        val c = weights[weightBase + 2]
+        var red = a * tints[tintBase] + b * tints[tintBase + 4] + c * tints[tintBase + 8]
+        var green = a * tints[tintBase + 1] + b * tints[tintBase + 5] + c * tints[tintBase + 9]
+        var blue = a * tints[tintBase + 2] + b * tints[tintBase + 6] + c * tints[tintBase + 10]
+        var alpha = a * tints[tintBase + 3] + b * tints[tintBase + 7] + c * tints[tintBase + 11]
+        if (texture != null) {
+            val u = a * texels[texelBase] + b * texels[texelBase + 2] + c * texels[texelBase + 4]
+            val v = a * texels[texelBase + 1] + b * texels[texelBase + 3] + c * texels[texelBase + 5]
+            if (!u.isFinite() || !v.isFinite()) {
+                out[0] = 0f
+                out[1] = 0f
+                out[2] = 0f
+                out[3] = 0f
+                return
+            }
+            val argb = texture.getRGB(
+                Math.floorMod(floor(u).toInt(), texture.width),
+                Math.floorMod(floor(v).toInt(), texture.height),
+            )
+            val texelAlpha = (argb ushr 24 and 0xFF) * (1f / 255f)
+            red *= (argb shr 16 and 0xFF) * (1f / 255f) * texelAlpha
+            green *= (argb shr 8 and 0xFF) * (1f / 255f) * texelAlpha
+            blue *= (argb and 0xFF) * (1f / 255f) * texelAlpha
+            alpha *= texelAlpha
+        }
+        out[0] = red
+        out[1] = green
+        out[2] = blue
+        out[3] = alpha
+    }
+
+    /** Source-over one covered source into the premultiplied pixel accumulator. */
+    private fun sourceOver(source: FloatArray, coverage: Float, accumulated: FloatArray) {
+        val alpha = source[3] * coverage
+        if (!(alpha > 0f)) return
+        val keep = 1f - alpha
+        accumulated[0] = source[0] * coverage + accumulated[0] * keep
+        accumulated[1] = source[1] * coverage + accumulated[1] * keep
+        accumulated[2] = source[2] * coverage + accumulated[2] * keep
+        accumulated[3] = alpha + accumulated[3] * keep
     }
 
     context(renderParam: WindowRenderParam, ctx: DslScaleContext)
@@ -644,6 +854,20 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
             }
             return
         }
+        // An affine scope inside an active projective one must not land in `graphics`: the graphics
+        // matrix is applied *after* the pending perspective, so A there would compose as A*P for a
+        // primitive whose local space is P*A. The inner transform belongs before the perspective, so
+        // it is folded into the pending matrix and the outer graphics state stays exactly as it was.
+        val active = renderParam.perspective
+        if (active != null) {
+            renderParam.perspective = active.concat(next)
+            try {
+                block()
+            } finally {
+                renderParam.perspective = active
+            }
+            return
+        }
         val graphics = renderParam.graphics
         val saved = graphics.transform
         graphics.transform(
@@ -717,70 +941,6 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
         }
     }
 
-    private fun triangle(x0: Float, y0: Float, x1: Float, y1: Float, x2: Float, y2: Float): Path2D.Float =
-        Path2D.Float().apply {
-            moveTo(x0, y0)
-            lineTo(x1, y1)
-            lineTo(x2, y2)
-            closePath()
-        }
-
-    /** The closed path through the points in [xs]/[ys], in the order given. */
-    private fun polygon(xs: FloatArray, ys: FloatArray): Path2D.Float = Path2D.Float().apply {
-        moveTo(xs[0], ys[0])
-        for (index in 1 until xs.size) lineTo(xs[index], ys[index])
-        closePath()
-    }
-
-    /** A triangle whose UV coordinates may exceed `Float` after scaling. */
-    private fun triangle(x0: Double, y0: Double, x1: Double, y1: Double, x2: Double, y2: Double): Path2D.Double =
-        Path2D.Double().apply {
-            moveTo(x0, y0)
-            lineTo(x1, y1)
-            lineTo(x2, y2)
-            closePath()
-        }
-
-    /**
-     * One corner of a projected shape: the perspective first, then the affine state the graphics is
-     * already in, which is what puts the corner in device space.
-     */
-    private fun putProjected(
-        matrix: AffineTransform,
-        perspective: WindowPerspective,
-        index: Int,
-        x: Float,
-        y: Float,
-        xs: FloatArray,
-        ys: FloatArray,
-    ) {
-        val point = Point2D.Float(perspective.projectX(x, y), perspective.projectY(x, y))
-        matrix.transform(point, point)
-        xs[index] = point.x
-        ys[index] = point.y
-    }
-
-    /** Fill a shape whose corners are already in device space, with one flat colour. */
-    context(renderParam: WindowRenderParam)
-    private fun fillPolygon(xs: FloatArray, ys: FloatArray, color: java.awt.Color) {
-        val graphics = renderParam.graphics
-        val savedTransform = graphics.transform
-        val savedPaint = graphics.paint
-        // Device space already: the fill must not be transformed a second time.
-        graphics.transform = AffineTransform()
-        graphics.paint = color
-        try {
-            val path = Path2D.Float()
-            path.moveTo(xs[0], ys[0])
-            for (index in 1 until xs.size) path.lineTo(xs[index], ys[index])
-            path.closePath()
-            graphics.fill(path)
-        } finally {
-            graphics.paint = savedPaint
-            graphics.transform = savedTransform
-        }
-    }
-
     context(renderParam: WindowRenderParam)
     private fun outline(rect: Rect, color: Color) {
         val bounds = rect.bounds() ?: return
@@ -789,59 +949,6 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
         fillRect(Rect(l.px, b.px - BORDER_WIDTH, r.px, b.px), color)
         fillRect(Rect(l.px, t.px, l.px + BORDER_WIDTH, b.px), color)
         fillRect(Rect(r.px - BORDER_WIDTH, t.px, r.px, b.px), color)
-    }
-
-    /**
-     * Fill a rectangle with the bilinear field that runs through its four corner colours.
-     *
-     * One shape rather than two triangles: Java2D anti-aliases each fill separately, so two fills
-     * sharing a diagonal cover only half of the pixels along it and whatever is behind shows through
-     * as a line. A single fill has no internal edge at all, and the crease a two-triangle split
-     * leaves is gone with it.
-     */
-    private fun fillBilinear(graphics: Graphics2D, l: Float, t: Float, r: Float, b: Float, lt: Color, rt: Color, lb: Color, rb: Color) {
-        val stepX = (r - l) / (GOURAUD_SIZE - 2f)
-        val stepY = (b - t) / (GOURAUD_SIZE - 2f)
-        val originX = l - stepX
-        val originY = t - stepY
-        val pixels = gouraudPixels
-        for (y in 0 until GOURAUD_SIZE) {
-            // The margin is one texel wide, so the field is evaluated slightly outside the rectangle.
-            val v = (originY + (y + 0.5f) * stepY - t) / (b - t)
-            for (x in 0 until GOURAUD_SIZE) {
-                val u = (originX + (x + 0.5f) * stepX - l) / (r - l)
-                pixels[y * GOURAUD_SIZE + x] = bilinear(lt, rt, lb, rb, u, v)
-            }
-        }
-        gouraudImage.setRGB(0, 0, GOURAUD_SIZE, GOURAUD_SIZE, pixels, 0, GOURAUD_SIZE)
-        val savedPaint = graphics.paint
-        val savedHint = graphics.getRenderingHint(RenderingHints.KEY_INTERPOLATION)
-        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-        graphics.paint = TexturePaint(
-            gouraudImage,
-            Rectangle2D.Float(originX, originY, stepX * GOURAUD_SIZE, stepY * GOURAUD_SIZE),
-        )
-        graphics.fill(Rectangle2D.Float(l, t, r - l, b - t))
-        graphics.paint = savedPaint
-        graphics.setRenderingHint(
-            RenderingHints.KEY_INTERPOLATION,
-            savedHint ?: RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR,
-        )
-    }
-
-    /** The bilinear field through four corner colours at ([u],[v]) of the rectangle. */
-    private fun bilinear(lt: Color, rt: Color, lb: Color, rb: Color, u: Float, v: Float): Int {
-        fun channel(a: Int, b: Int, c: Int, d: Int): Int {
-            val top = a + u * (b - a)
-            val bottom = c + u * (d - c)
-            return (top + v * (bottom - top)).roundToInt().coerceIn(0, 255)
-        }
-        return Color(
-            channel(lt.rInt, rt.rInt, lb.rInt, rb.rInt),
-            channel(lt.gInt, rt.gInt, lb.gInt, rb.gInt),
-            channel(lt.bInt, rt.bInt, lb.bInt, rb.bInt),
-            channel(lt.aInt, rt.aInt, lb.aInt, rb.aInt),
-        ).argbInt
     }
 
     /** Draw a decoded icon into the given bounds, scaled with nearest-neighbour so it stays crisp. */
@@ -857,180 +964,40 @@ internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
         )
     }
 
-    /** The exact paint for the corner combinations Java2D has a primitive for, or `null`. */
-    private fun gradientPaint(l: Float, t: Float, r: Float, b: Float, lt: Color, rt: Color, lb: Color, rb: Color): Paint? {
-        if (lt == rt && rt == lb && lb == rb) return lt.awt()
-        if (lt == lb && rt == rb) return linear(l, t, r, t, lt, rt)
-        if (lt == rt && lb == rb) return linear(l, t, l, b, lt, lb)
-        return null
-    }
-
-    /**
-     * The image a Gouraud field is painted through, and the buffer it is evaluated into. One image is
-     * reused: only one field is painted at a time, and painting only happens on the window's thread.
-     */
-    private val gouraudImage = BufferedImage(GOURAUD_SIZE, GOURAUD_SIZE, BufferedImage.TYPE_INT_ARGB)
-    private val gouraudPixels = IntArray(GOURAUD_SIZE * GOURAUD_SIZE)
-
-    /**
-     * The single tinted source image [paintTexture] reuses, the image and tint colour it was made
-     * from, and the scratch buffer the tint is applied into. Bounded by construction: at most one
-     * tinted copy exists at a time.
-     */
-    private var tintedImage: BufferedImage? = null
-    private var tintedSource: BufferedImage? = null
-    private var tintedKey: Int = 0
-    private var tintedPixels: IntArray = IntArray(0)
-
-    /**
-     * Fill a triangle with the affine colour field that runs through its three vertex colours.
-     *
-     * Java2D has no Gouraud shading, but the field through three colours is affine, and that is
-     * exactly what a two-by-two image filtered bilinearly reproduces: its four texels are the field's
-     * values at the corners of the triangle's bounding box, so everything between them interpolates
-     * the same plane. A four-corner quad is two of these.
-     */
-    private fun fillGouraud(
-        graphics: Graphics2D,
-        x0: Float, y0: Float, x1: Float, y1: Float, x2: Float, y2: Float,
-        c0: Int, c1: Int, c2: Int,
-    ) {
-        val dx1 = x1 - x0
-        val dy1 = y1 - y0
-        val dx2 = x2 - x0
-        val dy2 = y2 - y0
-        val area = dx1 * dy2 - dx2 * dy1
-        val left = minOf(x0, x1, x2)
-        val top = minOf(y0, y1, y2)
-        val right = maxOf(x0, x1, x2)
-        val bottom = maxOf(y0, y1, y2)
-        if (area == 0f || !area.isFinite() || right <= left || bottom <= top) {
-            graphics.color = averageOf(c0, c1, c2)
-            graphics.fill(triangle(x0, y0, x1, y1, x2, y2))
-            return
-        }
-        val color0 = Color(c0)
-        val color1 = Color(c1)
-        val color2 = Color(c2)
-        // An affine field is fully described by a small image of it: bilinear filtering between the
-        // samples of an affine function gives that function back. The image is anchored one texel
-        // wider than the triangle on each side, because a texture tiles - without the margin the
-        // filter would reach into the neighbouring copy at the edges.
-        val stepX = (right - left) / (GOURAUD_SIZE - 2f)
-        val stepY = (bottom - top) / (GOURAUD_SIZE - 2f)
-        val originX = left - stepX
-        val originY = top - stepY
-        val pixels = gouraudPixels
-        for (y in 0 until GOURAUD_SIZE) {
-            val py = originY + (y + 0.5f) * stepY - y0
-            for (x in 0 until GOURAUD_SIZE) {
-                val px = originX + (x + 0.5f) * stepX - x0
-                // The barycentric weights of the sample inside the vertex triangle: the colour field
-                // is the same plane, so extrapolating with them is the field, not an approximation.
-                val u1 = (px * dy2 - py * dx2) / area
-                val u2 = (py * dx1 - px * dy1) / area
-                pixels[y * GOURAUD_SIZE + x] = affine(color0, color1, color2, u1, u2)
-            }
-        }
-        gouraudImage.setRGB(0, 0, GOURAUD_SIZE, GOURAUD_SIZE, pixels, 0, GOURAUD_SIZE)
-        val savedPaint = graphics.paint
-        val savedHint = graphics.getRenderingHint(RenderingHints.KEY_INTERPOLATION)
-        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-        graphics.paint = TexturePaint(
-            gouraudImage,
-            Rectangle2D.Float(originX, originY, stepX * GOURAUD_SIZE, stepY * GOURAUD_SIZE),
-        )
-        graphics.fill(triangle(x0, y0, x1, y1, x2, y2))
-        graphics.paint = savedPaint
-        graphics.setRenderingHint(
-            RenderingHints.KEY_INTERPOLATION,
-            savedHint ?: RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR,
-        )
-    }
-
-    /** The affine field through three colours, at the point with barycentric weights [u1] and [u2]. */
-    private fun affine(c0: Color, c1: Color, c2: Color, u1: Float, u2: Float): Int {
-        fun channel(v0: Int, v1: Int, v2: Int) = (v0 + u1 * (v1 - v0) + u2 * (v2 - v0)).roundToInt().coerceIn(0, 255)
-        // ARGB, because the texels go into a Java2D image; the framework packs the other way round.
-        return Color(
-            channel(c0.rInt, c1.rInt, c2.rInt),
-            channel(c0.gInt, c1.gInt, c2.gInt),
-            channel(c0.bInt, c1.bInt, c2.bInt),
-            channel(c0.aInt, c1.aInt, c2.aInt),
-        ).argbInt
-    }
-
-    private fun linear(x0: Float, y0: Float, x1: Float, y1: Float, from: Color, to: Color): Paint {
-        if (from == to) return from.awt()
-        if (x0 == x1 && y0 == y1) return from.awt()
-        return LinearGradientPaint(
-            Point2D.Float(x0, y0),
-            Point2D.Float(x1, y1),
-            floatArrayOf(0f, 1f),
-            arrayOf(from.awt(), to.awt()),
-        )
-    }
-
-    /** One packed RGBA vertex colour per entry: the buffer the framework hands to [renderTriangles]. */
-    private fun averageOf(vararg colors: Int): java.awt.Color {
-        var a = 0
-        var r = 0
-        var g = 0
-        var b = 0
-        for (packed in colors) {
-            val color = Color(packed)
-            r += color.rInt
-            g += color.gInt
-            b += color.bInt
-            a += color.aInt
-        }
-        val count = colors.size
-        return java.awt.Color(r / count, g / count, b / count, a / count)
-    }
-
-    private fun averageOf(lt: Color, rt: Color, lb: Color, rb: Color): Color =
-        lt.averageWith(rt).averageWith(lb.averageWith(rb))
-
-    /** The mean of three vertex colours: the tint a textured triangle multiplies its texture by. */
-    private fun average(c0: Color, c1: Color, c2: Color): Color = Color(
-        (c0.rInt + c1.rInt + c2.rInt) / 3,
-        (c0.gInt + c1.gInt + c2.gInt) / 3,
-        (c0.bInt + c1.bInt + c2.bInt) / 3,
-        (c0.aInt + c1.aInt + c2.aInt) / 3,
-    )
-
-    private fun Color.awt() = java.awt.Color(rInt, gInt, bInt, aInt)
-
-    /**
-     * The affine map that sends the three UV points to the three vertices, or `null` when the UV
-     * triangle is degenerate and no such map exists.
-     *
-     * Double throughout: a scaled UV may be far outside `Float` even though the input measures were
-     * finite, and the map itself only has to stay a valid affine transform.
-     */
-    private fun uvToUser(
-        u0: Double, v0: Double, x0: Double, y0: Double,
-        u1: Double, v1: Double, x1: Double, y1: Double,
-        u2: Double, v2: Double, x2: Double, y2: Double,
-    ): AffineTransform? {
-        val determinant = u0 * (v1 - v2) - v0 * (u1 - u2) + (u1 * v2 - u2 * v1)
-        if (determinant == 0.0 || !determinant.isFinite()) return null
-        fun onX(a0: Double, a1: Double, a2: Double) =
-            (a0 * (v1 - v2) - v0 * (a1 - a2) + (a1 * v2 - a2 * v1)) / determinant
-        fun onY(a0: Double, a1: Double, a2: Double) =
-            (u0 * (a1 - a2) - a0 * (u1 - u2) + (u1 * a2 - u2 * a1)) / determinant
-        fun origin(a0: Double, a1: Double, a2: Double) =
-            (u0 * (v1 * a2 - a1 * v2) - v0 * (u1 * a2 - a1 * u2) + a0 * (u1 * v2 - v1 * u2)) / determinant
-        return AffineTransform(
-            onX(x0, x1, x2), onX(y0, y1, y2),
-            onY(x0, x1, x2), onY(y0, y1, y2),
-            origin(x0, x1, x2), origin(y0, y1, y2),
-        )
-    }
-
     /** Measures per vertex: `x, y` alone, or `x, y, u, v` when textured. */
     private val XY_STRIDE = 2
     private val XYUV_STRIDE = 4
+
+    /** The smallest homogeneous weight a projected corner may have and still be drawn. */
+    private val MIN_PROJECTIVE_W = 1e-6
+
+    /** Device pixels per raster tile: a triangle list's only working surface is `TILE` squared. */
+    private val TILE = 256
+
+    /** Subpixel resolution of a triangle's anti-aliased outer edge. */
+    private val SUBDIVISION = 4
+    private val SUBPIXELS = SUBDIVISION * SUBDIVISION
+
+    /** Local-space tolerance for treating a sample as lying exactly on an edge. */
+    private val EDGE_EPSILON = 1e-8
+
+    /** A primitive larger than this many device pixels is rejected rather than streamed forever. */
+    private val MAX_TRIANGLE_EXTENT = 1.0e6
+
+    /** Scratch surface and row reused by the triangle rasteriser; both are bounded by [TILE]. */
+    private var trianglePatch: BufferedImage? = null
+    private var triangleRow = IntArray(0)
+
+    private fun trianglePatchBuffer(): BufferedImage {
+        val current = trianglePatch
+        if (current != null) return current
+        return BufferedImage(TILE, TILE, BufferedImage.TYPE_INT_ARGB).also { trianglePatch = it }
+    }
+
+    private fun triangleRowBuffer(): IntArray {
+        if (triangleRow.size < TILE) triangleRow = IntArray(TILE)
+        return triangleRow
+    }
 
     private val BORDER_WIDTH = 1.px
 

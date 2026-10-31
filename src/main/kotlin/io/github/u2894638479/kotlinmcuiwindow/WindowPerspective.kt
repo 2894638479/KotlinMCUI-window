@@ -15,6 +15,22 @@ internal class WindowPerspective(
     /** Whether `AffineTransform` can hold this one: there is no third row to speak of. */
     val isAffine get() = m20 == 0f && m21 == 0f && m22 == 1f
 
+    /**
+     * Writes this matrix row-major, so the renderer can compose it with the affine graphics state
+     * and invert the result for the one device-to-local mapping the field is sampled through.
+     */
+    internal fun writeMatrix(out: DoubleArray) {
+        out[0] = m00.toDouble()
+        out[1] = m01.toDouble()
+        out[2] = m02.toDouble()
+        out[3] = m10.toDouble()
+        out[4] = m11.toDouble()
+        out[5] = m12.toDouble()
+        out[6] = m20.toDouble()
+        out[7] = m21.toDouble()
+        out[8] = m22.toDouble()
+    }
+
     /** [x] after the divide by `w`, in the space this transform maps into. */
     fun projectX(x: Float, y: Float): Float {
         val w = m20 * x + m21 * y + m22
