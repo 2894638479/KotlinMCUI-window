@@ -26,8 +26,9 @@ class WindowScaleTest {
     }
 
     @Test
-    fun `a surface that has not been painted yet is one`() {
-        // The root provider sets the size in frame(), so a page built before the first frame sees this.
+    fun `an empty target still has a finite scale`() {
+        // A minimised window has no pixels, but its root scale must not become zero or non-finite:
+        // empty output is expressed by the viewport, never by pausing the scale.
         assertEquals(1.0, guiScaleFor(0, 0))
     }
 
@@ -37,5 +38,22 @@ class WindowScaleTest {
         assertEquals(4.5, guiScaleFor(1920, 1080))
         assertTrue(guiScaleFor(1920, 1080) > before)
         assertTrue(guiScaleFor(1440, 810) > before)
+    }
+
+    @Test
+    fun `an output extent is the target's real backing size`() {
+        // The two axes are measured separately, so a non-uniform display keeps both fractions.
+        assertEquals(480, outputExtent(320, 1.5))
+        assertEquals(384, outputExtent(240, 1.6))
+        // A partial last pixel still needs a bitmap pixel: 101 * 1.25 = 126.25 and 61 * 1.5 = 91.5.
+        assertEquals(127, outputExtent(101, 1.25))
+        assertEquals(92, outputExtent(61, 1.5))
+        // An exact whole extent does not gain a pixel through floating point.
+        assertEquals(480, outputExtent(384, 1.25))
+        // A target that has no pixels, or a transform that cannot produce any, is empty output.
+        assertEquals(0, outputExtent(0, 1.5))
+        assertEquals(0, outputExtent(320, 0.0))
+        assertEquals(0, outputExtent(320, Double.NaN))
+        assertEquals(0, outputExtent(320, Double.POSITIVE_INFINITY))
     }
 }

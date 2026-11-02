@@ -20,11 +20,13 @@ import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import java.awt.geom.AffineTransform
 import javax.swing.JFrame
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import javax.swing.WindowConstants
+import kotlin.math.hypot
 
 /**
  * The Swing window one backend instance has, and the page stack inside it.
@@ -80,6 +82,18 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
 
     /** The root this window renders, given by [attach] before any page is created for it. */
     private var root: DslRoot? = null
+
+    /**
+     * Actual output pixels per logical pixel on each axis, as measured by the last paint.
+     *
+     * The values stay fractional: they are the graphics transform's scale, not the rounded bitmap
+     * extent divided by the logical extent. The window keeps them so a capture can build its bitmap
+     * at the target's real size, and the pointer can land on the pixel that was actually drawn, even
+     * when a logical extent ends part-way through a target pixel. They start at 1.0 because a window
+     * that has never painted has no target to measure; every frame updates both.
+     */
+    private var outputScaleX = 1.0
+    private var outputScaleY = 1.0
 
     /** Give this window the root it renders. Every page it creates belongs to that root. */
     internal fun attach(root: DslRoot) {
@@ -229,6 +243,13 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
     /**
      * One frame of the root this window renders, or `false` when nothing was painted.
      *
+     * [width] and [height] are the surface's logical pixels, the range the platform reports, while
+     * the framework works in the drawing target's own pixels. The graphics transform is the actual
+     * display-to-target mapping, so its per-axis scale gives the real backing size - fractional and
+     * non-uniform are both kept. That mapping is then removed before the tree is rendered: the
+     * framework receives output-pixel coordinates and painting in them with the platform's scale
+     * still in place would apply DPI twice.
+     *
      * Nothing is painted when there is no root yet, and when the root has been closed. A frame can
      * still be queued while the window is going away, and that is an expected state rather than an
      * unexpected use: painting it would be wrong, but letting it reach the root's teardown gate
@@ -240,20 +261,65 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
         WindowImages.sweep()
         val root = root ?: return false
         if (root.isClosed) return false
-        // The surface size goes to both the root's viewport and the renderer's scale, then the tree
-        // is rendered and committed.
-        renderer.surfaceWidth = width
-        renderer.surfaceHeight = height
+
+        val incoming = graphics.transform
+        val deviceScaleX = hypot(incoming.scaleX, incoming.shearY)
+        val deviceScaleY = hypot(incoming.shearX, incoming.scaleY)
+        val outputWidth = outputExtent(width, deviceScaleX)
+        val outputHeight = outputExtent(height, deviceScaleY)
+        // The actual transform's fractional scale, not the rounded bitmap extent ratio: 101 logical
+        // pixels at 1.25 are 100 output pixels at logical 80, while the 127-pixel bitmap would say
+        // 100.594. Drawing below is 1:1 in output pixels, so input must use this same scale.
+        outputScaleX = deviceScaleX.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
+        outputScaleY = deviceScaleY.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
+        // Input is converted once, here at the boundary, so the cursor and the pixel under it are in
+        // the same space as drawing and clipping.
+        input.mapOutput(outputScaleX, outputScaleY)
+
+        // The root's viewport and its scale are the target's pixels, and both are written before the
+        // tree is rendered - including on the first frame after a resize.
         root.rect.apply {
             left = 0.px
             top = 0.px
-            right = width.px
-            bottom = height.px
+            right = outputWidth.px
+            bottom = outputHeight.px
         }
-        val param = WindowRenderParam(graphics, width, height)
-        context(renderer, param, input.mouse) { root.component.render() }
+        // A zero-size target is an empty output, not a paused one: the scale stays finite and the
+        // tree can still build, while every draw lands outside the zero-area viewport.
+        root.scale = guiScaleFor(outputWidth, outputHeight)
+
+        // The platform's scale is carried by the extents above. Render through a derived context
+        // whose user space is the target's pixels, and keep the surface's clip in that same space.
+        val originX = incoming.translateX
+        val originY = incoming.translateY
+        val deviceClip = graphics.clip?.let { incoming.createTransformedShape(it) }
+        val target = graphics.create() as Graphics2D
+        try {
+            target.transform = AffineTransform.getTranslateInstance(originX, originY)
+            target.clip = deviceClip?.let {
+                AffineTransform.getTranslateInstance(-originX, -originY).createTransformedShape(it)
+            }
+            val param = WindowRenderParam(target, outputWidth, outputHeight)
+            context(renderer, param, input.mouse) { root.component.render() }
+        } finally {
+            target.dispose()
+        }
         return true
     }
+
+    /**
+     * The bitmap size a capture must have at the given logical extent.
+     *
+     * It is the same fractional per-axis mapping the last paint used, rounded up once to whole
+     * bitmap pixels. Keeping the fraction instead of re-dividing a rounded extent is what stops a
+     * later capture from losing it or compounding the rounding at a new logical size.
+     */
+    internal fun outputSize(logicalWidth: Int, logicalHeight: Int): Dimension =
+        Dimension(outputExtent(logicalWidth, outputScaleX), outputExtent(logicalHeight, outputScaleY))
+
+    /** The actual per-axis mapping of the last paint, for a capture to reuse unchanged. */
+    internal fun paintScale(): AffineTransform =
+        AffineTransform.getScaleInstance(outputScaleX, outputScaleY)
 
     /** Give up the desktop resources. Pages must already be gone; a later [push] builds a new window. */
     private fun dispose() {

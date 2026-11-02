@@ -8,7 +8,6 @@ import io.github.u2894638479.kotlinmcui.backend.Environment
 import io.github.u2894638479.kotlinmcui.backend.dslUtils
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.image.ImageHolder
-import io.github.u2894638479.kotlinmcui.math.px
 import java.awt.image.BufferedImage
 import java.io.File
 import java.nio.file.Paths
@@ -72,16 +71,7 @@ class WindowCoexistenceTest {
         val surface = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
         val graphics = surface.createGraphics()
         try {
-            built.renderer.surfaceWidth = width
-            built.renderer.surfaceHeight = height
-            built.root.rect.apply {
-                left = 0.px
-                top = 0.px
-                right = width.px
-                bottom = height.px
-            }
-            val param = WindowRenderParam(graphics, width, height)
-            context(built.renderer, param, built.input.mouse) { built.root.component.render() }
+            assertTrue(built.window.paintFrame(graphics, width, height), "an open root must paint its frame")
         } finally {
             graphics.dispose()
         }

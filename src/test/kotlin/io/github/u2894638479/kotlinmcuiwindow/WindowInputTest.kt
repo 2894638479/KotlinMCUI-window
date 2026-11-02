@@ -189,8 +189,9 @@ class WindowInputTest {
     }
 
     @Test
-    fun `the cursor position follows the window's own coordinates`() {
-        // AWT delivers cursor coordinates in the component's space, which is the space Rect uses.
+    fun `the cursor starts at the window's own coordinates until a frame maps it`() {
+        // AWT delivers cursor coordinates in the component's logical space. No frame has measured an
+        // output target here, so the boundary is still one logical pixel to one output pixel.
         runCatching { input.mouseMoved(7, 11) }
         assertEquals(7.0, input.mouse.x.raw, 0.0)
         assertEquals(11.0, input.mouse.y.raw, 0.0)

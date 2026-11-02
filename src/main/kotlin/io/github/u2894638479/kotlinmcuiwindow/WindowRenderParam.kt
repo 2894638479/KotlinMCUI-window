@@ -17,11 +17,16 @@ import java.awt.geom.Area
  * The effective region is kept in [outputClip] and is always enforced by the native Java2D clip.
  */
 class WindowRenderParam(
-    /** The surface the current frame is being painted on. */
+    /**
+     * The surface the current frame is being painted on.
+     *
+     * Its user space is the drawing target's pixels: the platform's display scale has already been
+     * removed at the window boundary, so a coordinate here is one pixel of the output target.
+     */
     val graphics: Graphics2D,
-    /** Width of the surface this frame paints, which is what the root's scale is derived from. */
+    /** Width of the output target this frame paints, in its own pixels. */
     val width: Int = 0,
-    /** Height of the surface this frame paints. */
+    /** Height of the output target this frame paints, in its own pixels. */
     val height: Int = 0,
 ) {
     /** The transform currently in effect, which is the one on [graphics]. */

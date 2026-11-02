@@ -1,6 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.input.Key
+import java.awt.Dimension
 import java.awt.event.KeyEvent
 import java.awt.image.BufferedImage
 import java.io.File
@@ -17,8 +18,8 @@ import kotlin.test.assertTrue
  * What one window must not share with the next.
  *
  * Every case is written against two instances rather than against the process, because that is the
- * distinction a second window turns on: the surface a scale is derived from, the pressed keys, the
- * cursor - and, in the other direction, the caches that are deliberately shared instead.
+ * distinction a second window turns on: the output mapping and scale of its own root, the pressed
+ * keys, the cursor - and, in the other direction, the caches that are deliberately shared instead.
  *
  * These are the criteria that can be written today. Two windows on screen at once needs the
  * framework's root support, not just this backend's instances.
@@ -31,22 +32,23 @@ class WindowIsolationTest {
         KeyEvent(source, KeyEvent.KEY_PRESSED, 0L, 0, keyCode, KeyEvent.CHAR_UNDEFINED)
 
     @Test
-    fun `a renderer derives its scale from its own surface`() {
-        val small = WindowRenderer()
-        val large = WindowRenderer()
-        small.surfaceWidth = 960
-        small.surfaceHeight = 540
-        large.surfaceWidth = 1920
-        large.surfaceHeight = 1080
+    fun `a window measures its own output and not its neighbour's`() {
+        val small = WindowHarness()
+        val large = WindowHarness()
+        small.mount({ })
+        large.mount({ })
+        small.paintInto(480, 384, 320, 240, 1.5, 1.6)
+        large.paintInto(640, 480, 320, 240, 2.0, 2.0)
 
-        assertEquals(guiScaleFor(960, 540), small.guiScale)
-        assertEquals(guiScaleFor(1920, 1080), large.guiScale)
-        assertTrue(large.guiScale > small.guiScale)
+        assertEquals(Dimension(480, 384), small.window.outputSize(320, 240))
+        assertEquals(Dimension(640, 480), large.window.outputSize(320, 240))
+        assertEquals(1.5, small.root.scale, 0.0)
+        assertEquals(2.0, large.root.scale, 0.0)
 
         // Resizing one window is not resizing the other, which is what a shared surface would say.
-        small.surfaceWidth = 800
-        small.surfaceHeight = 600
-        assertEquals(guiScaleFor(1920, 1080), large.guiScale)
+        small.paintInto(320, 240, 160, 120, 2.0, 2.0)
+        assertEquals(Dimension(640, 480), large.window.outputSize(320, 240))
+        assertEquals(2.0, large.root.scale, 0.0)
     }
 
     @Test

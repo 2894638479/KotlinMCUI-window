@@ -54,17 +54,6 @@ import kotlin.math.floor
  * missing texture through the same geometry, UV and tint, never as a flat colour or untextured draw.
  */
 internal class WindowRenderer : DslRootRenderer<WindowRenderParam> {
-    /**
-     * The surface the scale is derived from, set by the window's frame loop before every frame so it is
-     * always the window's current size. Zero until the first paint, which the formula floors to 1.0.
-     */
-    internal var surfaceWidth: Int = 0
-    internal var surfaceHeight: Int = 0
-
-    /** The scale that makes a page's `.scaled` sizes come out at the current window's proportions. */
-    override val guiScale: Double get() = guiScaleFor(surfaceWidth, surfaceHeight)
-
-
     context(renderParam: WindowRenderParam)
     override fun renderQuad(rect: Rect, lt: Color, rt: Color, lb: Color, rb: Color) {
         val bounds = rect.drawableBounds() ?: return

@@ -122,9 +122,16 @@ internal class WindowUtils : DslPlatformUtils, DslRootUtils {
         val frame = frame ?: return null
         if (frame.top() == null) return null
         val surface = frame.surface() ?: return null
-        val image = BufferedImage(maxOf(surface.width, 1), maxOf(surface.height, 1), BufferedImage.TYPE_INT_ARGB)
+        // The bitmap is the target's real pixels, not the platform's logical range. Painting through
+        // the same fractional logical-to-output scale the last frame measured makes the panel compute
+        // those extents itself, instead of writing a logical-size image and leaving the rest of a
+        // HiDPI frame empty - while keeping the unrounded scale for the next capture.
+        val size = frame.outputSize(surface.width, surface.height)
+        if (size.width <= 0 || size.height <= 0) return null
+        val image = BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_ARGB)
         val graphics = image.createGraphics()
         return try {
+            graphics.transform(frame.paintScale())
             surface.printAll(graphics)
             val file = File(WindowMetadata.gameDir.toFile(), "screenshots/$fileName")
             file.parentFile?.mkdirs()

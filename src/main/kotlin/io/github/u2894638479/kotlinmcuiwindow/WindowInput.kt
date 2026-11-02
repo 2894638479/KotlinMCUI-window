@@ -39,20 +39,55 @@ internal class WindowInput : DslRootInput {
      */
     var root: DslRoot? = null
 
-    override var mouse = Position(0.px, 0.px)
-        private set
+    /**
+     * The cursor in the platform's own coordinate space, as every AWT event reports it.
+     *
+     * It is kept raw and mapped when read, so a window that was resized or moved to a display with a
+     * different scale answers from the current mapping instead of from the coordinates of the last
+     * paint. AWT delivers the cursor in the component's logical pixels; the framework's root, its
+     * rect and all untransformed drawing are in the output target's pixels.
+     */
+    private var cursorX = 0.0
+    private var cursorY = 0.0
+
+    /**
+     * Actual output pixels per logical pixel on each axis, updated by the frame that paints.
+     *
+     * Kept fractional: it is the graphics transform's scale, not the rounded bitmap extent divided
+     * by the logical extent. A pointer must land on the output pixel that drawing actually painted.
+     */
+    private var outputScaleX = 1.0
+    private var outputScaleY = 1.0
+
+    override val mouse: Position
+        get() = Position((cursorX * outputScaleX).px, (cursorY * outputScaleY).px)
 
     private val heldKeys = HashSet<Int>()
     private val heldButtons = HashSet<Int>()
+
+    /**
+     * Adopt the actual per-axis scale of one painted frame.
+     *
+     * These are the graphics transform's own ratios, the same ones drawing uses after the platform
+     * scale is removed. They are not the rounded bitmap extent divided by the logical range: 101
+     * logical pixels at 1.25 keep 1.25 here even though their bitmap is 127 pixels wide, so logical
+     * 80 stays output 100 instead of drifting to 100.594. A non-finite or non-positive scale falls
+     * back to one logical pixel per output pixel, matching a window that has no target yet.
+     */
+    internal fun mapOutput(scaleX: Double, scaleY: Double) {
+        outputScaleX = if (scaleX.isFinite() && scaleX > 0.0) scaleX else 1.0
+        outputScaleY = if (scaleY.isFinite() && scaleY > 0.0) scaleY else 1.0
+    }
 
     override fun isKeyDown(key: Key) = heldKeys.contains(key.code)
 
     override fun isMouseDown(mouse: Int) = heldButtons.contains(mouse)
 
     override fun setPreeditArea(rect: Rect) {
-        // Swing exposes no IME candidate-window placement API: the candidate window is positioned by
-        // the input method on every platform this backend runs on. A toolkit that has one would
-        // position it here.
+        // [rect] is in output pixels, like the root and every untransformed drawing. Swing exposes no
+        // IME candidate-window placement API: the candidate window is positioned by the input method
+        // on every platform this backend runs on. A toolkit that had one would position it in logical
+        // panel coordinates, so it would have to divide back through the same per-axis ratios above.
     }
 
     /**
@@ -73,7 +108,8 @@ internal class WindowInput : DslRootInput {
         }
 
     fun mouseMoved(x: Int, y: Int) {
-        mouse = Position(x.px, y.px)
+        cursorX = x.toDouble()
+        cursorY = y.toDouble()
         val root = root ?: return
         guarded("a cursor move", Unit) { context(mouse) { root.component.mouseMove() } }
     }
