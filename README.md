@@ -82,3 +82,5 @@ legacy Forge（1.7.10–1.12.2）**不覆盖**：那需要另一套注解属性�
 ## 开发文档
 
 设计取舍见 [docs/dev/design.md](docs/dev/design.md)。正式文档在核心仓库（这个仓库不放正式文档）。
+
+输入适配与实际设备能力见 [指针输入开发说明](docs/dev/pointer-input.md)。

@@ -1,7 +1,7 @@
 package io.github.u2894638479.kotlinmcuiwindow
 
 import io.github.u2894638479.kotlinmcui.input.Key
-import io.github.u2894638479.kotlinmcui.input.MouseButton
+import io.github.u2894638479.kotlinmcui.input.PointerButton
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseEvent
@@ -113,9 +113,9 @@ class WindowInputTest {
     @Test
     fun `mouse buttons follow the shared indices rather than awt's numbers`() {
         // GLFW and SDL count left, right, middle; AWT numbers them left, middle, right.
-        assertEquals(MouseButton.LEFT, buttonOf(mouseEvent(MouseEvent.BUTTON1)))
-        assertEquals(MouseButton.RIGHT, buttonOf(mouseEvent(MouseEvent.BUTTON3)))
-        assertEquals(MouseButton.MIDDLE, buttonOf(mouseEvent(MouseEvent.BUTTON2)))
+        assertEquals(PointerButton.PRIMARY, buttonOf(mouseEvent(MouseEvent.BUTTON1)))
+        assertEquals(PointerButton.SECONDARY, buttonOf(mouseEvent(MouseEvent.BUTTON3)))
+        assertEquals(PointerButton.AUXILIARY, buttonOf(mouseEvent(MouseEvent.BUTTON2)))
         assertEquals(0, buttonOf(mouseEvent(MouseEvent.BUTTON1))?.ordinal)
         assertEquals(1, buttonOf(mouseEvent(MouseEvent.BUTTON3))?.ordinal)
         assertEquals(2, buttonOf(mouseEvent(MouseEvent.BUTTON2))?.ordinal)
@@ -125,8 +125,8 @@ class WindowInputTest {
     fun `a button past the three awt names keeps counting upwards`() {
         // AWT has no constants for the side buttons: it reports them as numbers, and the index they
         // carry is the one the framework wants.
-        assertEquals(MouseButton.BUTTON4, buttonOf(mouseEvent(4)))
-        assertEquals(MouseButton.BUTTON5, buttonOf(mouseEvent(5)))
+        assertEquals(PointerButton.BUTTON4, buttonOf(mouseEvent(4)))
+        assertEquals(PointerButton.BUTTON5, buttonOf(mouseEvent(5)))
     }
 
     @Test
@@ -159,19 +159,16 @@ class WindowInputTest {
     fun `a held key and button are reported down until focus is lost`() {
         input.releaseAll()
         assertFalse(input.isKeyDown(Key.A))
-        assertFalse(input.isMouseDown(MouseButton.LEFT.ordinal))
 
         // The pressed set is updated before the framework dispatch, which has no page to reach here,
         // so this records the state even though the dispatch itself cannot land.
         runCatching { input.keyPressed(keyEvent(KeyEvent.VK_A)) }
         runCatching { input.mousePressed(mouseEvent(MouseEvent.BUTTON1)) }
         assertTrue(input.isKeyDown(Key.A))
-        assertTrue(input.isMouseDown(MouseButton.LEFT.ordinal))
 
         // A window that loses the focus never sees the matching release, so it drops everything it held.
         input.releaseAll()
         assertFalse(input.isKeyDown(Key.A))
-        assertFalse(input.isMouseDown(MouseButton.LEFT.ordinal))
     }
 
     @Test

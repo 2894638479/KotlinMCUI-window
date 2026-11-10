@@ -1,6 +1,6 @@
 # 输出坐标与尺度（窗口后端）
 
-核心契约见核心仓库的 `docs/dev/render-scale.md`：`root.rect`、`root.input.mouse` 与没有额外变换的绘制坐标是同一套输出目标像素；`root.scale` 由后端在每帧显式设置，没有隐式 1.0。这里只记录 Swing 后端如何满足它。
+核心契约见核心仓库的 `docs/dev/render-scale.md`：`root.rect`、`PointerEvent.position` 与没有额外变换的绘制坐标是同一套输出目标像素；`root.scale` 由后端在每帧显式设置，没有隐式 1.0。这里只记录 Swing 后端如何满足它。
 
 ## 窗口边界的唯一一次换算
 

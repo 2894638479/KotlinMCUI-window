@@ -95,6 +95,12 @@ val coreNavigation: Any? = if (siblingCore.isDirectory) {
     null
 }
 
+val coreDemo: Any = if (siblingCore.isDirectory) files(
+    siblingCore.resolve("build/libs/kotlinmcui-$kotlinmcui_version-demo.jar").also {
+        check(it.exists()) { "the local core demo jar is missing: run ./gradlew assemble in $siblingCore" }
+    },
+) else "com.github.2894638479:KotlinMCUI:v$kotlinmcui_version:demo"
+
 /**
  * What the standalone `main()` needs on its classpath and a loader supplies in a game. Kept out of
  * `runtimeClasspath` so the built jar stays a mod jar and nothing is bundled.
@@ -132,6 +138,7 @@ dependencies {
     compileOnly("net.neoforged:bus:$neoforge_bus_version") { isTransitive = false }
 
     standalone(coreJar)
+    standalone(coreDemo)
     standalone(slf4j)
     // A logging backend, so the standalone run says what it is doing: nothing else on this classpath
     // implements the SLF4J binding the framework logs through.
@@ -147,6 +154,7 @@ dependencies {
     // the tests actually execute is therefore named here as well.
     testImplementation(kotlin("test"))
     testImplementation(coreJar)
+    testImplementation(coreDemo)
     testImplementation(slf4j)
     testImplementation(serializationJson)
     // The coexistence cases build a real root, so they need the framework's runtime pieces that

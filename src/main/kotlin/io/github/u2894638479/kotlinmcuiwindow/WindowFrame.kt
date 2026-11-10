@@ -300,7 +300,7 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
                 AffineTransform.getTranslateInstance(-originX, -originY).createTransformedShape(it)
             }
             val param = WindowRenderParam(target, outputWidth, outputHeight)
-            context(renderer, param, input.mouse) { root.component.render() }
+            context(renderer, param) { root.component.render() }
         } finally {
             target.dispose()
         }
@@ -402,17 +402,16 @@ internal class WindowFrame(private val renderer: WindowRenderer, private val inp
             addMouseListener(object : MouseAdapter() {
                 override fun mousePressed(event: MouseEvent) {
                     requestFocusInWindow()
-                    input.mouseMoved(event.x, event.y)
                     input.mousePressed(event)
                 }
 
-                override fun mouseReleased(event: MouseEvent) {
-                    input.mouseReleased(event)
-                }
+                override fun mouseReleased(event: MouseEvent) { input.mouseReleased(event) }
+                override fun mouseExited(event: MouseEvent) { input.mouseLeft() }
+                override fun mouseEntered(event: MouseEvent) { input.mouseMoved(event.x, event.y, modifiersOf(event)) }
             })
             addMouseMotionListener(object : MouseMotionAdapter() {
-                override fun mouseMoved(event: MouseEvent) = input.mouseMoved(event.x, event.y)
-                override fun mouseDragged(event: MouseEvent) = input.mouseMoved(event.x, event.y)
+                override fun mouseMoved(event: MouseEvent) = input.mouseMoved(event.x, event.y, modifiersOf(event))
+                override fun mouseDragged(event: MouseEvent) = input.mouseMoved(event.x, event.y, modifiersOf(event))
             })
             addMouseWheelListener { event -> input.mouseWheel(event) }
             addKeyListener(object : KeyAdapter() {

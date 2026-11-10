@@ -4,7 +4,7 @@ import io.github.u2894638479.kotlinmcui.backend.DslRootInput
 import io.github.u2894638479.kotlinmcui.container.DslRoot
 import io.github.u2894638479.kotlinmcui.input.Key
 import io.github.u2894638479.kotlinmcui.input.KeyModifiers
-import io.github.u2894638479.kotlinmcui.input.MouseButton
+import io.github.u2894638479.kotlinmcui.input.*
 import io.github.u2894638479.kotlinmcui.logger.dslLogger
 import io.github.u2894638479.kotlinmcui.math.Position
 import io.github.u2894638479.kotlinmcui.math.px
@@ -59,11 +59,13 @@ internal class WindowInput : DslRootInput {
     private var outputScaleX = 1.0
     private var outputScaleY = 1.0
 
-    override val mouse: Position
+    val mouse: Position
         get() = Position((cursorX * outputScaleX).px, (cursorY * outputScaleY).px)
 
     private val heldKeys = HashSet<Int>()
-    private val heldButtons = HashSet<Int>()
+    private val heldButtons = LinkedHashSet<PointerButton>()
+    private val mouseId = PointerId(0)
+    private var lastModifiers = KeyModifiers()
 
     /**
      * Adopt the actual per-axis scale of one painted frame.
@@ -81,7 +83,6 @@ internal class WindowInput : DslRootInput {
 
     override fun isKeyDown(key: Key) = heldKeys.contains(key.code)
 
-    override fun isMouseDown(mouse: Int) = heldButtons.contains(mouse)
 
     override fun setPreeditArea(rect: Rect) {
         // [rect] is in output pixels, like the root and every untransformed drawing. Swing exposes no
@@ -107,25 +108,39 @@ internal class WindowInput : DslRootInput {
             fallback
         }
 
-    fun mouseMoved(x: Int, y: Int) {
-        cursorX = x.toDouble()
-        cursorY = y.toDouble()
+    fun mouseMoved(x: Int, y: Int, modifiers: KeyModifiers = lastModifiers) {
+        cursorX = x.toDouble(); cursorY = y.toDouble()
+        lastModifiers = modifiers
         val root = root ?: return
-        guarded("a cursor move", Unit) { context(mouse) { root.component.mouseMove() } }
+        guarded("cursor move", false) {
+            root.dispatchPointer(PointerEvent.Move(mouseId, PointerKind.MOUSE, mouse, heldButtons.toSet(), true, modifiers))
+        }
     }
 
     fun mousePressed(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
-        heldButtons.add(button.ordinal)
+        cursorX = event.x.toDouble(); cursorY = event.y.toDouble()
+        lastModifiers = modifiersOf(event)
+        heldButtons.add(button)
         val root = root ?: return false
-        return guarded("a mouse press", false) { context(mouse, modifiersOf(event)) { root.component.mouseDown(button) } }
+        return guarded("mouse press", false) {
+            root.dispatchPointer(PointerEvent.Down(mouseId, PointerKind.MOUSE, mouse, button, heldButtons.toSet(), true, lastModifiers))
+        }
     }
 
     fun mouseReleased(event: MouseEvent): Boolean {
         val button = buttonOf(event) ?: return false
-        heldButtons.remove(button.ordinal)
+        cursorX = event.x.toDouble(); cursorY = event.y.toDouble()
+        lastModifiers = modifiersOf(event)
+        heldButtons.remove(button)
         val root = root ?: return false
-        return guarded("a mouse release", false) { context(mouse, modifiersOf(event)) { root.component.mouseUp(button) } }
+        return guarded("mouse release", false) {
+            root.dispatchPointer(PointerEvent.Up(mouseId, PointerKind.MOUSE, mouse, button, heldButtons.toSet(), true, lastModifiers))
+        }
+    }
+
+    fun mouseLeft() {
+        root?.let { guarded("pointer leave", false) { it.dispatchPointer(PointerEvent.Leave(mouseId)) } }
     }
 
     fun mouseWheel(event: MouseWheelEvent) {
@@ -134,10 +149,9 @@ internal class WindowInput : DslRootInput {
         val root = root ?: return
         val amount = -event.preciseWheelRotation
         guarded("a scroll", Unit) {
-            context(mouse) {
-                if (event.isShiftDown) root.component.mouseScrollHorizontal(amount)
-                else root.component.mouseScrollVertical(amount)
-            }
+            cursorX = event.x.toDouble(); cursorY = event.y.toDouble()
+            if (event.isShiftDown) root.dispatchScrollHorizontal(mouse, amount)
+            else root.dispatchScrollVertical(mouse, amount)
         }
     }
 
@@ -147,27 +161,31 @@ internal class WindowInput : DslRootInput {
         val root = root ?: return false
         // The framework reads a repeat as another press, which is what GLFW's GLFW_REPEAT path does,
         // so a repeated AWT event is passed straight through.
-        return guarded("a key press", false) { context(modifiersOf(event)) { root.component.keyDown(key, event.keyCode) } }
+        return guarded("a key press", false) { root.dispatchKeyDown(key, event.keyCode, modifiersOf(event)) }
     }
 
     fun keyReleased(event: KeyEvent): Boolean {
         val key = keyOf(event)
         heldKeys.remove(key.code)
         val root = root ?: return false
-        return guarded("a key release", false) { context(modifiersOf(event)) { root.component.keyUp(key, event.keyCode) } }
+        return guarded("a key release", false) { root.dispatchKeyUp(key, event.keyCode, modifiersOf(event)) }
     }
 
     fun keyTyped(event: KeyEvent): Boolean {
         val root = root ?: return false
         val typed = event.keyChar
         if (typed == KeyEvent.CHAR_UNDEFINED) return false
-        return guarded("a typed character", false) { context(modifiersOf(event)) { root.component.charTyped(typed) } }
+        return guarded("a typed character", false) { root.dispatchCharTyped(typed) }
     }
 
     /** A window that loses focus never sees the key-up, so nothing may stay stuck down. */
     fun releaseAll() {
         heldKeys.clear()
         heldButtons.clear()
+        lastModifiers = KeyModifiers()
+        root?.takeUnless { it.isClosed }?.let {
+            guarded("source loss", false) { it.dispatchPointer(PointerEvent.Cancel(mouseId)) }
+        }
     }
 }
 
@@ -201,15 +219,15 @@ internal fun keyOf(event: KeyEvent): Key = when (val code = event.keyCode) {
     else -> Key.custom(Key.CUSTOM_RANGE_START + code)
 }
 
-/** Translate an AWT mouse event to the framework's [MouseButton], or `null` for an unknown one. */
-internal fun buttonOf(event: MouseEvent): MouseButton? {
+/** Translate an AWT mouse event to the framework's [PointerButton], or `null` for an unknown one. */
+internal fun buttonOf(event: MouseEvent): PointerButton? {
     val index = when (event.button) {
         MouseEvent.BUTTON1 -> 0
         MouseEvent.BUTTON3 -> 1
         MouseEvent.BUTTON2 -> 2
         else -> event.button - 1
     }
-    return MouseButton.entries.getOrNull(index)
+    return PointerButton.entries.getOrNull(index)
 }
 
 internal fun modifiersOf(event: InputEvent) = KeyModifiers(

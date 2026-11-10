@@ -34,7 +34,7 @@ class WindowOutputTest {
     private fun probe(width: Int, height: Int, plate: Color, marker: Color): DslFunction = {
         Spacer(Modifier, "output-probe").change { base ->
             object : DslComponent by base {
-                context(backend: DslRootRenderer<RP>, renderParam: RP, mouse: Position)
+                context(backend: DslRootRenderer<RP>, renderParam: RP)
                 override fun <RP> render() {
                     // A clip and a fill in the same output coordinates: the fill must stop exactly at
                     // the scissor's edge, not at that edge scaled a second time.
@@ -55,7 +55,7 @@ class WindowOutputTest {
     private fun fill(width: Int, height: Int, color: Color): DslFunction = {
         Spacer(Modifier, "output-fill").change { base ->
             object : DslComponent by base {
-                context(backend: DslRootRenderer<RP>, renderParam: RP, mouse: Position)
+                context(backend: DslRootRenderer<RP>, renderParam: RP)
                 override fun <RP> render() {
                     backend.fillRect(Rect(0.px, 0.px, width.px, height.px), color)
                 }
@@ -67,7 +67,7 @@ class WindowOutputTest {
     private fun column(left: Double, right: Double, bottom: Double, color: Color): DslFunction = {
         Spacer(Modifier, "output-column").change { base ->
             object : DslComponent by base {
-                context(backend: DslRootRenderer<RP>, renderParam: RP, mouse: Position)
+                context(backend: DslRootRenderer<RP>, renderParam: RP)
                 override fun <RP> render() {
                     backend.fillRect(Rect(left.px, 0.px, right.px, bottom.px), color)
                 }

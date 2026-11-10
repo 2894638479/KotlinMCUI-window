@@ -106,7 +106,7 @@ jar 内同时带 fabric.mod.json、META-INF/mods.toml、META-INF/neoforge.mods.t
 核心不再替后端驱动帧。每帧入口先做一次图片缓存 `sweep()`（见上一节），然后一帧就是两步，按这个顺序：
 
 1. 把输出目标的像素尺寸写给根：`root.rect`（渲染 pass 会把它拷到每个已挂载的屏）与 `root.scale`（由输出像素派生）；面板的逻辑尺寸先用平台的实际变换换成输出像素，派生 `Graphics2D` 去掉平台缩放后再画；
-2. `context(renderer, renderParam, input.mouse) { root.component.render() }`——渲染器作为 context 实参传进去，不要让别的角色去"冒充"渲染器；
+2. `context(renderer, renderParam) { root.component.render() }`——渲染器作为 context 实参传进去，不要让别的角色去"冒充"渲染器；
 
 顺序反了，屏会按上一帧的尺寸布局；第 2 步漏掉，窗口就是一片空白。 收窗口时**先 `root.close()`、再停驱动**：关掉根之后，晚到的一帧会在门口被拒，而不是画进一个正在消失的窗口。预览也不再由运行时顺带启动：`DslPreview.start(root)` 要显式调。
 
